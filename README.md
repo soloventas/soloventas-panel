@@ -86,3 +86,4 @@ prisma/seed.ts       → datos de ejemplo
 4. Cuando esté listo para producción: elegir dónde alojarlo (Vercel para el
    panel + una base Postgres administrada, por ejemplo Neon o Supabase, son
    las opciones más simples para no mantener un servidor propio).
+   v2
