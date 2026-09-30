@@ -95,6 +95,7 @@ model Producto {
   contenido     ContenidoGenerado[]
   media         MediaProducto[]
   publicaciones Publicacion[]
+  trabajosIA    TrabajoIA[]
 }
 
 // Cada combinación de color / talle con su propio stock.
@@ -117,6 +118,11 @@ enum TipoMedia {
   VIDEO
 }
 
+enum OrigenMedia {
+  ORIGINAL
+  IA
+}
+
 // Fotos (máx. 20) y videos (máx. 5) de cada producto, guardados en Vercel Blob.
 // La foto con menor "orden" es la portada del producto.
 model MediaProducto {
@@ -129,9 +135,33 @@ model MediaProducto {
   nombre     String?
   tamano     Int?
   orden      Int       @default(0)
+  // Lo generado con IA queda pendiente hasta que se aprueba; solo lo
+  // aprobado se puede publicar o usar como portada.
+  origen     OrigenMedia @default(ORIGINAL)
+  aprobado   Boolean     @default(true)
   createdAt  DateTime  @default(now())
 
   @@index([productoId, tipo, orden])
+}
+
+// Fotos y videos que se piden a la IA en modo automático (fal.ai).
+// Mientras la IA trabaja queda PENDIENTE; al terminar, el archivo se guarda
+// como MediaProducto de origen IA, pendiente de aprobación.
+model TrabajoIA {
+  id          String    @id @default(cuid())
+  productoId  String
+  producto    Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  tipo        TipoMedia
+  modelo      String
+  prompt      String
+  statusUrl   String
+  responseUrl String
+  estado      String    @default("PENDIENTE") // PENDIENTE | LISTO | ERROR
+  error       String?
+  mediaId     String?
+  createdAt   DateTime  @default(now())
+
+  @@index([productoId, createdAt])
 }
 
 enum TipoContenido {
