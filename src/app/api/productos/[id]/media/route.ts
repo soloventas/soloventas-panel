@@ -27,7 +27,9 @@ export async function POST(
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
-  const { url, pathname, tipo, nombre, tamano } = await req.json();
+  const { url, pathname, tipo, nombre, tamano, origen } = await req.json();
+  // Lo que se sube como "generado con IA" queda pendiente de aprobación.
+  const esIA = origen === "IA";
 
   if (!url || !pathname || (tipo !== "FOTO" && tipo !== "VIDEO") || !esUrlDeBlob(url)) {
     return NextResponse.json({ error: "Archivo inválido." }, { status: 400 });
@@ -75,6 +77,8 @@ export async function POST(
       nombre: typeof nombre === "string" ? nombre.slice(0, 200) : null,
       tamano: typeof tamano === "number" ? Math.round(tamano) : null,
       orden: ultimo ? ultimo.orden + 1 : 0,
+      origen: esIA ? "IA" : "ORIGINAL",
+      aprobado: !esIA,
     },
   });
 
