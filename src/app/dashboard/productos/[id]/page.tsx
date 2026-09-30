@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import EditarProductoForm from "./editar-form";
 import SeccionMedios from "./seccion-medios";
 import { iaConfigurada } from "@/lib/ia";
+import { falConfigurado } from "@/lib/fal";
 
 export default async function EditarProductoPage({
   params,
@@ -24,7 +25,7 @@ export default async function EditarProductoPage({
   const media = await prisma.mediaProducto.findMany({
     where: { productoId: producto.id },
     orderBy: [{ orden: "asc" }, { createdAt: "asc" }],
-    select: { id: true, tipo: true, url: true, nombre: true },
+    select: { id: true, tipo: true, url: true, nombre: true, origen: true, aprobado: true },
   });
 
   const cuentas = await prisma.integracionRed.findMany({
@@ -55,6 +56,8 @@ export default async function EditarProductoPage({
           inicial={media}
           redes={redes}
           iaActiva={iaConfigurada()}
+          falActivo={falConfigurado()}
+          producto={producto.nombre}
         />
       </div>
       <EditarProductoForm
