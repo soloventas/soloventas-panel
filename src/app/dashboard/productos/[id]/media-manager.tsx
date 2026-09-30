@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   MAX_FOTOS,
@@ -33,6 +33,32 @@ function mb(bytes: number) {
   return `${Math.round(bytes / (1024 * 1024))} MB`;
 }
 
+// Instagram solo acepta fotos JPG de hasta 8 MB. Si la foto es PNG/WEBP o
+// pesa más de 8 MB, la convertimos a JPG (máx. 2400 px) antes de subirla.
+const LIMITE_JPG_INSTAGRAM = 8 * 1024 * 1024;
+
+async function prepararFoto(archivo: File): Promise<File> {
+  if (archivo.type === "image/jpeg" && archivo.size <= LIMITE_JPG_INSTAGRAM) return archivo;
+  try {
+    const imagen = await createImageBitmap(archivo);
+    const escala = Math.min(1, 2400 / Math.max(imagen.width, imagen.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(imagen.width * escala);
+    canvas.height = Math.round(imagen.height * escala);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return archivo;
+    ctx.fillStyle = "#ffffff"; // fondo blanco para PNG con transparencia
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(imagen, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, "image/jpeg", 0.9));
+    if (!blob) return archivo;
+    const nombre = archivo.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], nombre, { type: "image/jpeg" });
+  } catch {
+    return archivo;
+  }
+}
+
 function nombreSeguro(nombre: string) {
   return nombre
     .normalize("NFD")
@@ -44,11 +70,17 @@ function nombreSeguro(nombre: string) {
 export default function MediaManager({
   productoId,
   inicial,
+  onCambio,
 }: {
   productoId: string;
   inicial: Media[];
+  onCambio?: (media: Media[]) => void;
 }) {
   const [media, setMedia] = useState<Media[]>(inicial);
+
+  useEffect(() => {
+    onCambio?.(media);
+  }, [media, onCambio]);
   const [subidas, setSubidas] = useState<Subida[]>([]);
   const [arrastrando, setArrastrando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
@@ -118,9 +150,10 @@ export default function MediaManager({
 
     setOcupado(true);
     // De a una, para respetar los límites y no saturar la conexión.
-    for (const { archivo, tipo, clave } of aSubir) {
+    for (const { archivo: original, tipo, clave } of aSubir) {
       actualizarSubida(clave, { estado: "subiendo" });
       try {
+        const archivo = tipo === "FOTO" ? await prepararFoto(original) : original;
         const blob = await upload(
           `productos/${productoId}/${tipo === "FOTO" ? "fotos" : "videos"}/${nombreSeguro(archivo.name)}`,
           archivo,
