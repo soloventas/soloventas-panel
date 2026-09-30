@@ -91,9 +91,10 @@ model Producto {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  variantes VarianteProducto[]
-  contenido ContenidoGenerado[]
-  media     MediaProducto[]
+  variantes     VarianteProducto[]
+  contenido     ContenidoGenerado[]
+  media         MediaProducto[]
+  publicaciones Publicacion[]
 }
 
 // Cada combinación de color / talle con su propio stock.
@@ -157,4 +158,62 @@ model ContenidoGenerado {
   notas      String? // motivo de rechazo, si corresponde
   createdAt  DateTime        @default(now())
   revisadoAt DateTime?
+}
+
+// ---------------------------------------------------------------------------
+// Redes sociales
+// ---------------------------------------------------------------------------
+
+enum RedSocial {
+  INSTAGRAM
+  FACEBOOK
+  YOUTUBE
+  TIKTOK
+}
+
+// Conexiones con las redes. "clave" identifica cada una:
+// "meta_usuario" (permiso general de Meta), "facebook" (la página elegida),
+// "instagram" (la cuenta profesional vinculada a esa página), etc.
+model IntegracionRed {
+  id          String    @id @default(cuid())
+  clave       String    @unique
+  nombre      String?
+  externalId  String?
+  accessToken String
+  expiraEn    DateTime?
+  extra       Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+enum FormatoPublicacion {
+  FOTO
+  CARRUSEL
+  VIDEO
+}
+
+enum EstadoPublicacion {
+  PROCESANDO
+  PUBLICADA
+  ERROR
+}
+
+// Cada publicación hecha desde el panel en una red.
+model Publicacion {
+  id          String             @id @default(cuid())
+  productoId  String
+  producto    Producto           @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  red         RedSocial
+  formato     FormatoPublicacion
+  texto       String
+  mediaUrls   String[]
+  estado      EstadoPublicacion  @default(PROCESANDO)
+  contenedor  String? // id intermedio de Instagram mientras procesa el archivo
+  externalId  String?
+  permalink   String?
+  error       String?
+  createdAt   DateTime           @default(now())
+  publicadaAt DateTime?
+
+  @@index([productoId, createdAt])
 }
