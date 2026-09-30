@@ -7,7 +7,7 @@ export default async function ProductosPage() {
       variantes: true,
       categoria: true,
       media: {
-        where: { tipo: "FOTO" },
+        where: { tipo: "FOTO", aprobado: true },
         orderBy: [{ orden: "asc" }, { createdAt: "asc" }],
         take: 1,
         select: { url: true },
