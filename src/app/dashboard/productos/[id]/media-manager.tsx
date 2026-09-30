@@ -18,6 +18,8 @@ export type Media = {
   tipo: TipoMedia;
   url: string;
   nombre: string | null;
+  origen?: "ORIGINAL" | "IA";
+  aprobado?: boolean;
 };
 
 type Subida = {
@@ -84,6 +86,7 @@ export default function MediaManager({
   const [subidas, setSubidas] = useState<Subida[]>([]);
   const [arrastrando, setArrastrando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
+  const [esIA, setEsIA] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const fotos = media.filter((m) => m.tipo === "FOTO");
@@ -177,6 +180,7 @@ export default function MediaManager({
             tipo,
             nombre: archivo.name,
             tamano: archivo.size,
+            origen: esIA ? "IA" : "ORIGINAL",
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -204,6 +208,19 @@ export default function MediaManager({
     }
   }
 
+  async function aprobar(m: Media) {
+    const res = await fetch(`/api/productos/${productoId}/media/${m.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accion: "aprobar" }),
+    });
+    if (res.ok) {
+      setMedia((prev) => prev.map((x) => (x.id === m.id ? { ...x, aprobado: true } : x)));
+    } else {
+      alert("No se pudo aprobar. Probá de nuevo.");
+    }
+  }
+
   async function hacerPortada(m: Media) {
     const res = await fetch(`/api/productos/${productoId}/media/${m.id}`, {
       method: "PATCH",
@@ -216,6 +233,9 @@ export default function MediaManager({
   }
 
   const lleno = fotos.length >= MAX_FOTOS && videos.length >= MAX_VIDEOS;
+  // La portada es la primera foto aprobada (lo pendiente de IA no cuenta).
+  const portadaId = fotos.find((f) => f.aprobado !== false)?.id;
+  const pendientes = media.filter((m) => m.aprobado === false).length;
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-5">
@@ -260,6 +280,12 @@ export default function MediaManager({
         <p className="text-xs text-gray-400 mt-2">
           Fotos JPG, PNG o WEBP hasta 15 MB · Videos MP4, MOV o WEBM hasta 100 MB
         </p>
+        {!lleno && (
+          <label className="mt-3 inline-flex items-center gap-2 text-xs text-gray-700">
+            <input type="checkbox" checked={esIA} onChange={(e) => setEsIA(e.target.checked)} />
+            Son fotos o videos generados con IA (quedan pendientes hasta que los apruebes)
+          </label>
+        )}
         <input
           ref={inputRef}
           type="file"
@@ -312,6 +338,15 @@ export default function MediaManager({
         </ul>
       )}
 
+      {pendientes > 0 && (
+        <div className="rounded-md bg-violet-50 text-violet-900 text-sm px-4 py-3">
+          Tenés {pendientes} {pendientes === 1 ? "archivo generado" : "archivos generados"} con IA
+          pendiente{pendientes === 1 ? "" : "s"} de revisión. Fijate que el producto se vea igual
+          al real (forma, color, logo) y tocá <b>Aprobar</b> o <b>Eliminar</b>. Solo lo aprobado se
+          puede publicar.
+        </div>
+      )}
+
       {/* Fotos */}
       <div>
         <p className="text-sm font-medium mb-2">
@@ -321,7 +356,7 @@ export default function MediaManager({
           <p className="text-sm text-gray-400">Todavía no hay fotos.</p>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {fotos.map((m, i) => (
+            {fotos.map((m) => (
               <div key={m.id} className="group relative rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -330,13 +365,34 @@ export default function MediaManager({
                   loading="lazy"
                   className="w-full aspect-square object-cover"
                 />
-                {i === 0 && (
-                  <span className="absolute top-1.5 left-1.5 text-[10px] font-bold uppercase tracking-wide bg-gold text-white px-1.5 py-0.5 rounded">
-                    Portada
-                  </span>
-                )}
+                <div className="absolute top-1.5 left-1.5 flex flex-wrap gap-1">
+                  {m.id === portadaId && (
+                    <span className="text-[10px] font-bold uppercase tracking-wide bg-gold text-white px-1.5 py-0.5 rounded">
+                      Portada
+                    </span>
+                  )}
+                  {m.origen === "IA" && (
+                    <span className="text-[10px] font-bold uppercase tracking-wide bg-violet-600 text-white px-1.5 py-0.5 rounded">
+                      IA
+                    </span>
+                  )}
+                  {m.aprobado === false && (
+                    <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-500 text-white px-1.5 py-0.5 rounded">
+                      Pendiente
+                    </span>
+                  )}
+                </div>
                 <div className="flex text-xs border-t border-gray-200 bg-white">
-                  {i !== 0 && (
+                  {m.aprobado === false && (
+                    <button
+                      type="button"
+                      onClick={() => aprobar(m)}
+                      className="flex-1 py-1.5 text-green-700 font-semibold hover:bg-green-50"
+                    >
+                      Aprobar
+                    </button>
+                  )}
+                  {m.aprobado !== false && m.id !== portadaId && (
                     <button
                       type="button"
                       onClick={() => hacerPortada(m)}
@@ -378,7 +434,28 @@ export default function MediaManager({
                   className="w-full aspect-video object-contain bg-black"
                 />
                 <div className="flex items-center justify-between gap-2 px-2 py-1.5 bg-white text-xs">
-                  <span className="truncate text-gray-600">{m.nombre ?? "Video"}</span>
+                  <span className="truncate text-gray-600">
+                    {m.origen === "IA" && (
+                      <span className="mr-1 text-[10px] font-bold uppercase bg-violet-600 text-white px-1.5 py-0.5 rounded">
+                        IA
+                      </span>
+                    )}
+                    {m.aprobado === false && (
+                      <span className="mr-1 text-[10px] font-bold uppercase bg-amber-500 text-white px-1.5 py-0.5 rounded">
+                        Pendiente
+                      </span>
+                    )}
+                    {m.nombre ?? "Video"}
+                  </span>
+                  {m.aprobado === false && (
+                    <button
+                      type="button"
+                      onClick={() => aprobar(m)}
+                      className="shrink-0 text-green-700 font-semibold hover:underline"
+                    >
+                      Aprobar
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => eliminar(m)}
