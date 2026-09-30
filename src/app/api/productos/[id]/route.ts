@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { del } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 
@@ -122,7 +123,14 @@ export async function DELETE(
   if (!session) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
   try {
+    const media = await prisma.mediaProducto.findMany({
+      where: { productoId: params.id },
+      select: { url: true },
+    });
     await prisma.producto.delete({ where: { id: params.id } });
+    if (media.length > 0) {
+      await del(media.map((m) => m.url)).catch(() => {});
+    }
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "No se pudo eliminar." }, { status: 400 });
