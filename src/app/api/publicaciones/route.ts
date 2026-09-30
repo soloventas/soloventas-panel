@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
   // Tomamos los archivos en el orden elegido y verificamos que sean del producto.
   const ids = Array.isArray(mediaIds) ? mediaIds : [];
   const media = await prisma.mediaProducto.findMany({
-    where: { productoId, id: { in: ids } },
+    where: { productoId, id: { in: ids }, aprobado: true },
   });
   const ordenados = ids
     .map((id) => media.find((m) => m.id === id))
