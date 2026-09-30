@@ -12,15 +12,15 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   return (
-    <div className="min-h-screen flex">
-      <aside className="w-60 shrink-0 bg-navy text-white flex flex-col">
+    <div className="min-h-screen flex flex-col md:flex-row">
+      <aside className="w-full md:w-60 shrink-0 bg-navy text-white flex flex-col">
         <div className="px-5 py-6 border-b border-white/10">
           <p className="text-[11px] tracking-wide uppercase text-gold font-bold">
             Solo Ventas IA
           </p>
           <p className="text-sm font-semibold mt-1">Panel del supervisor</p>
         </div>
-        <nav className="flex-1 px-3 py-4 flex flex-col gap-1 text-sm">
+        <nav className="flex-1 px-3 py-3 md:py-4 flex flex-row flex-wrap md:flex-col gap-1 text-sm">
           <Link
             href="/dashboard"
             className="px-3 py-2 rounded-md hover:bg-white/10"
@@ -63,7 +63,7 @@ export default async function DashboardLayout({
           <LogoutButton />
         </div>
       </aside>
-      <main className="flex-1 p-8">{children}</main>
+      <main className="flex-1 min-w-0 p-4 md:p-8">{children}</main>
     </div>
   );
 }
