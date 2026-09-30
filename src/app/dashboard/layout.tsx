@@ -52,6 +52,12 @@ export default async function DashboardLayout({
             Talles
           </Link>
           <Link
+            href="/dashboard/redes"
+            className="px-3 py-2 rounded-md hover:bg-white/10"
+          >
+            Redes sociales
+          </Link>
+          <Link
             href="/dashboard/contenido"
             className="px-3 py-2 rounded-md hover:bg-white/10"
           >
