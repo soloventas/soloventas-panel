@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import EditarProductoForm from "./editar-form";
-import MediaManager from "./media-manager";
+import SeccionMedios from "./seccion-medios";
+import { iaConfigurada } from "@/lib/ia";
 
 export default async function EditarProductoPage({
   params,
@@ -26,6 +27,15 @@ export default async function EditarProductoPage({
     select: { id: true, tipo: true, url: true, nombre: true },
   });
 
+  const cuentas = await prisma.integracionRed.findMany({
+    where: { clave: { in: ["instagram", "facebook"] } },
+    select: { clave: true, nombre: true },
+  });
+  const redes = {
+    instagram: cuentas.find((c) => c.clave === "instagram")?.nombre ?? null,
+    facebook: cuentas.find((c) => c.clave === "facebook")?.nombre ?? null,
+  };
+
   return (
     <div className="max-w-2xl">
       <h1 className="text-2xl font-semibold text-navy mb-1">
@@ -40,7 +50,12 @@ export default async function EditarProductoPage({
       )}
 
       <div className="mb-5">
-        <MediaManager productoId={producto.id} inicial={media} />
+        <SeccionMedios
+          productoId={producto.id}
+          inicial={media}
+          redes={redes}
+          iaActiva={iaConfigurada()}
+        />
       </div>
       <EditarProductoForm
         producto={{
