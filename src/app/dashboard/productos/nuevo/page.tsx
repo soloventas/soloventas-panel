@@ -150,7 +150,10 @@ export default function NuevoProductoPage() {
       return;
     }
 
-    router.push("/dashboard/productos");
+    const creado = await res.json().catch(() => null);
+    router.push(
+      creado?.id ? `/dashboard/productos/${creado.id}?nuevo=1` : "/dashboard/productos"
+    );
     router.refresh();
   }
 
@@ -478,7 +481,7 @@ export default function NuevoProductoPage() {
             disabled={loading}
             className="rounded-md bg-navy text-white text-sm font-semibold px-5 py-2.5 hover:opacity-90 disabled:opacity-60"
           >
-            {loading ? "Guardando..." : "Guardar producto"}
+            {loading ? "Guardando..." : "Guardar y cargar fotos"}
           </button>
         </div>
       </form>
