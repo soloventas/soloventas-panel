@@ -95,11 +95,21 @@ export default function EditarProductoForm({
       .catch(() => {});
   }, []);
 
+  // Costo + % de ganancia => precio de venta final.
   function calcularPrecioVenta(costo: string, ganancia: string) {
     const c = Number(costo);
     const g = Number(ganancia);
-    if (!costo || !ganancia || isNaN(c) || isNaN(g)) return;
+    if (costo === "" || ganancia === "" || isNaN(c) || isNaN(g)) return;
     setPrecio((c * (1 + g / 100)).toFixed(2));
+  }
+
+  // Si cambiás el precio final a mano, se recalcula el % de ganancia.
+  function cambiarPrecioVenta(valor: string) {
+    setPrecio(valor);
+    const c = Number(precioCosto);
+    const p = Number(valor);
+    if (precioCosto === "" || valor === "" || !c || isNaN(p)) return;
+    setGananciaPorcentaje((((p - c) / c) * 100).toFixed(2));
   }
 
   function actualizarVariante(i: number, campo: keyof Variante, valor: string) {
@@ -121,6 +131,13 @@ export default function EditarProductoForm({
   }
 
   const usaVariantes = admiteColor || admiteTalle;
+
+  const simbolo = moneda === "USD" ? "US$" : "$";
+  const costoNum = Number(precioCosto);
+  const precioNum = Number(precio);
+  const hayMargen =
+    precioCosto !== "" && precio !== "" && costoNum > 0 && !isNaN(precioNum);
+  const margen = precioNum - costoNum;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -186,7 +203,7 @@ export default function EditarProductoForm({
     <div className="flex flex-col gap-5">
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <Seccion titulo="Datos del producto">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Campo label="Código">
               <input
                 disabled
@@ -238,7 +255,7 @@ export default function EditarProductoForm({
         </Seccion>
 
         <Seccion titulo="Precios">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Campo label="Moneda">
               <select
                 value={moneda}
@@ -249,7 +266,7 @@ export default function EditarProductoForm({
                 <option value="USD">Dólares (USD)</option>
               </select>
             </Campo>
-            <Campo label="Costo $">
+            <Campo label={`Costo ${simbolo}`}>
               <input
                 type="number"
                 step="0.01"
@@ -259,8 +276,11 @@ export default function EditarProductoForm({
                   calcularPrecioVenta(e.target.value, gananciaPorcentaje);
                 }}
                 className="input"
+                placeholder="5000"
               />
             </Campo>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Campo label="Ganancia %">
               <input
                 type="number"
@@ -271,22 +291,47 @@ export default function EditarProductoForm({
                   calcularPrecioVenta(precioCosto, e.target.value);
                 }}
                 className="input"
+                placeholder="70"
+              />
+            </Campo>
+            <Campo label={`Precio de venta final ${simbolo}`} required>
+              <input
+                required
+                type="number"
+                step="0.01"
+                value={precio}
+                onChange={(e) => cambiarPrecioVenta(e.target.value)}
+                className="input font-semibold"
+                placeholder="8500"
               />
             </Campo>
           </div>
-          <Campo label="Precio venta $" required>
-            <input
-              required
-              type="number"
-              step="0.01"
-              value={precio}
-              onChange={(e) => setPrecio(e.target.value)}
-              className="input"
-            />
-          </Campo>
-          <p className="text-xs text-gray-400">
-            El precio de venta no puede ser menor al costo. La ganancia se
-            calcula sobre el costo.
+          {hayMargen && (
+            <div
+              className={`rounded-md px-3 py-2 text-sm ${
+                margen < 0 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-800"
+              }`}
+            >
+              {margen < 0 ? (
+                "El precio de venta es menor al costo."
+              ) : (
+                <>
+                  Ganás{" "}
+                  <b>
+                    {simbolo}{" "}
+                    {margen.toLocaleString("es-AR", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </b>{" "}
+                  por unidad ({((margen / costoNum) * 100).toFixed(1)}% sobre el costo).
+                </>
+              )}
+            </div>
+          )}
+          <p className="text-xs text-gray-500">
+            Cargá el costo y el % de ganancia: el precio final se calcula solo.
+            Si cambiás el precio a mano, el % de ganancia se ajusta.
           </p>
         </Seccion>
 
@@ -330,12 +375,12 @@ export default function EditarProductoForm({
               </p>
               <div className="flex flex-col gap-2">
                 {variantes.map((v, i) => (
-                  <div key={i} className="flex gap-2 items-center">
+                  <div key={i} className="flex flex-wrap gap-2 items-center">
                     {admiteColor && (
                       <select
                         value={v.colorId}
                         onChange={(e) => actualizarVariante(i, "colorId", e.target.value)}
-                        className="input flex-1"
+                        className="input flex-1 min-w-[11rem]"
                       >
                         <option value="">Color...</option>
                         {colores.map((c) => (
@@ -349,7 +394,7 @@ export default function EditarProductoForm({
                       <select
                         value={v.talleId}
                         onChange={(e) => actualizarVariante(i, "talleId", e.target.value)}
-                        className="input w-32"
+                        className="input !w-32 shrink-0"
                       >
                         <option value="">Talle...</option>
                         {talles.map((t) => (
@@ -364,7 +409,7 @@ export default function EditarProductoForm({
                       type="number"
                       value={v.stock}
                       onChange={(e) => actualizarVariante(i, "stock", e.target.value)}
-                      className="input w-24"
+                      className="input !w-24 shrink-0"
                     />
                     <button
                       type="button"
@@ -386,7 +431,7 @@ export default function EditarProductoForm({
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Campo label="Mínimo de compra">
               <input
                 type="number"
@@ -418,7 +463,7 @@ export default function EditarProductoForm({
             </Campo>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -482,6 +527,7 @@ export default function EditarProductoForm({
           font-size: 0.875rem;
           width: 100%;
           background: white;
+          color: #1a1d29;
         }
         .input:focus {
           outline: none;
