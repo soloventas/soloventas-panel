@@ -3,7 +3,16 @@ import { prisma } from "@/lib/prisma";
 
 export default async function ProductosPage() {
   const productos = await prisma.producto.findMany({
-    include: { variantes: true, categoria: true },
+    include: {
+      variantes: true,
+      categoria: true,
+      media: {
+        where: { tipo: "FOTO" },
+        orderBy: [{ orden: "asc" }, { createdAt: "asc" }],
+        take: 1,
+        select: { url: true },
+      },
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -26,10 +35,11 @@ export default async function ProductosPage() {
         </Link>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        <table className="w-full text-sm min-w-[720px]">
           <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
             <tr>
+              <th className="px-4 py-3 w-16"></th>
               <th className="text-left px-4 py-3">Código</th>
               <th className="text-left px-4 py-3">Nombre</th>
               <th className="text-left px-4 py-3">Categoría</th>
@@ -49,6 +59,23 @@ export default async function ProductosPage() {
               const simbolo = p.moneda === "USD" ? "US$" : "$";
               return (
                 <tr key={p.id} className="border-t border-gray-100">
+                  <td className="px-4 py-2">
+                    <Link href={`/dashboard/productos/${p.id}`} className="block w-12 h-12">
+                      {p.media[0] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={p.media[0].url}
+                          alt=""
+                          loading="lazy"
+                          className="w-12 h-12 rounded-md object-cover border border-gray-200"
+                        />
+                      ) : (
+                        <span className="w-12 h-12 rounded-md border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-[10px] text-gray-400 text-center leading-tight">
+                          Sin foto
+                        </span>
+                      )}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs text-gray-600">
                     {p.codigo}
                   </td>
@@ -101,7 +128,7 @@ export default async function ProductosPage() {
             })}
             {productos.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                   Todavía no cargaste productos.
                 </td>
               </tr>
