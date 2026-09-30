@@ -93,6 +93,7 @@ model Producto {
 
   variantes VarianteProducto[]
   contenido ContenidoGenerado[]
+  media     MediaProducto[]
 }
 
 // Cada combinación de color / talle con su propio stock.
@@ -108,6 +109,28 @@ model VarianteProducto {
   stock      Int      @default(0)
 
   @@unique([productoId, colorId, talleId])
+}
+
+enum TipoMedia {
+  FOTO
+  VIDEO
+}
+
+// Fotos (máx. 20) y videos (máx. 5) de cada producto, guardados en Vercel Blob.
+// La foto con menor "orden" es la portada del producto.
+model MediaProducto {
+  id         String    @id @default(cuid())
+  productoId String
+  producto   Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  tipo       TipoMedia
+  url        String
+  pathname   String
+  nombre     String?
+  tamano     Int?
+  orden      Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  @@index([productoId, tipo, orden])
 }
 
 enum TipoContenido {
