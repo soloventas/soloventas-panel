@@ -32,23 +32,23 @@ export function NuevoColorForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 items-start">
-      <div className="w-32">
+    <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-2 sm:items-start">
+      <div className="sm:w-36">
         <input
           required
           value={codigo}
           onChange={(e) => setCodigo(e.target.value)}
           placeholder="Código (ej: NEG)"
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy bg-white text-gray-900"
         />
       </div>
-      <div className="flex-1">
+      <div className="flex-1 min-w-0">
         <input
           required
           value={nombre}
           onChange={(e) => setNombre(e.target.value)}
           placeholder="Nombre (ej: Negro)"
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy bg-white text-gray-900"
         />
         {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
       </div>
