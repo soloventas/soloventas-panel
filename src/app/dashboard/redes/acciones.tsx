@@ -3,36 +3,118 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function AccionesMeta({ conectado }: { conectado: boolean }) {
+export type Red = "instagram" | "facebook" | "youtube" | "tiktok";
+
+export function TarjetaRed({
+  red,
+  titulo,
+  descripcion,
+  color,
+  cuenta,
+  configurado,
+  urlConectar,
+  aviso,
+  pasos,
+  callback,
+}: {
+  red: Red;
+  titulo: string;
+  descripcion: string;
+  color: string;
+  cuenta: string | null;
+  configurado: boolean;
+  urlConectar: string;
+  aviso?: string | null;
+  pasos: string[];
+  callback: string;
+}) {
   const router = useRouter();
   const [ocupado, setOcupado] = useState(false);
+  const [verPasos, setVerPasos] = useState(false);
 
   async function desconectar() {
-    if (!confirm("¿Desconectar Instagram y Facebook del panel?")) return;
+    const extra = red === "facebook" ? " (también se desconecta Instagram)" : "";
+    if (!confirm(`¿Desconectar ${titulo} del panel?${extra}`)) return;
     setOcupado(true);
-    await fetch("/api/meta/paginas", { method: "DELETE" });
+    await fetch("/api/redes/desconectar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ red }),
+    });
     setOcupado(false);
     router.refresh();
   }
 
   return (
-    <div className="flex gap-2">
-      <a
-        href="/api/meta/login"
-        className="rounded-md bg-navy text-white text-sm font-semibold px-4 py-2 hover:opacity-90"
-      >
-        {conectado ? "Volver a conectar" : "Conectar con Meta"}
-      </a>
-      {conectado && (
-        <button
-          type="button"
-          onClick={desconectar}
-          disabled={ocupado}
-          className="rounded-md border border-gray-300 text-sm px-3 py-2 hover:bg-gray-50 disabled:opacity-50"
-        >
-          Desconectar
-        </button>
-      )}
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex flex-col">
+      <div className="h-1.5" style={{ background: color }} />
+      <div className="p-5 flex flex-col gap-3 flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-semibold text-gray-900">{titulo}</p>
+            <p className="text-xs text-gray-500">{descripcion}</p>
+          </div>
+          {cuenta ? (
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide bg-green-100 text-green-700 px-2 py-1 rounded">
+              Conectada
+            </span>
+          ) : (
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide bg-gray-100 text-gray-500 px-2 py-1 rounded">
+              Sin conectar
+            </span>
+          )}
+        </div>
+
+        {cuenta && <p className="text-sm font-medium text-gray-800">✓ {cuenta}</p>}
+        {aviso && <p className="text-xs text-amber-700">{aviso}</p>}
+
+        <div className="mt-auto flex flex-wrap gap-2 pt-1">
+          {configurado ? (
+            <>
+              <a
+                href={urlConectar}
+                className="rounded-md bg-navy text-white text-sm font-semibold px-4 py-2 hover:opacity-90"
+              >
+                {cuenta ? "Volver a conectar" : "Conectar"}
+              </a>
+              {cuenta && (
+                <button
+                  type="button"
+                  onClick={desconectar}
+                  disabled={ocupado}
+                  className="rounded-md border border-gray-300 text-sm px-3 py-2 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Desconectar
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setVerPasos((v) => !v)}
+              className="rounded-md border border-amber-300 bg-amber-50 text-amber-900 text-sm px-3 py-2 hover:bg-amber-100"
+            >
+              {verPasos ? "Ocultar configuración" : "Falta configurar (una sola vez)"}
+            </button>
+          )}
+        </div>
+
+        {!configurado && verPasos && (
+          <div className="rounded-md bg-gray-50 border border-gray-200 p-3 text-xs text-gray-700 flex flex-col gap-2">
+            <ol className="list-decimal pl-4 flex flex-col gap-1">
+              {pasos.map((p, i) => (
+                <li key={i}>{p}</li>
+              ))}
+            </ol>
+            <div>
+              <p className="text-gray-500">URL de redirección para cargar en esa plataforma:</p>
+              <code className="block mt-1 bg-white border border-gray-200 rounded px-2 py-1 break-all">
+                {callback}
+              </code>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -64,7 +146,7 @@ export function ElegirPagina() {
     });
     setGuardando(null);
     if (r.ok) {
-      router.replace("/dashboard/redes?ok=1");
+      router.replace("/dashboard/redes?ok=meta");
       router.refresh();
     } else {
       const data = await r.json().catch(() => ({}));
@@ -73,7 +155,7 @@ export function ElegirPagina() {
   }
 
   return (
-    <div className="rounded-lg bg-gray-50 border border-gray-200 p-4">
+    <div className="rounded-xl bg-white border border-navy/30 p-4">
       <p className="text-sm font-medium mb-2">¿Con qué página de Facebook querés publicar?</p>
       {error && <p className="text-sm text-red-600">{error}</p>}
       {!paginas && !error && <p className="text-sm text-gray-500">Cargando páginas...</p>}
