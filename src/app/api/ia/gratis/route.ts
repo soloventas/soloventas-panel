@@ -8,6 +8,7 @@ import {
   promptsFotos,
   limpiarEstilos,
   limpiarTexto,
+  fichaDe,
   type EscenaId,
   type FormatoId,
   type FotoTipoId,
@@ -98,7 +99,12 @@ export async function POST(req: NextRequest) {
 
   const producto = await prisma.producto.findUnique({
     where: { id: productoId },
-    select: { id: true, nombre: true },
+    select: {
+      id: true,
+      nombre: true,
+      descripcion: true,
+      variantes: { select: { color: { select: { nombre: true } }, talle: { select: { nombre: true } } } },
+    },
   });
   if (!producto) return NextResponse.json({ error: "Producto no encontrado." }, { status: 404 });
 
@@ -109,6 +115,7 @@ export async function POST(req: NextRequest) {
   const formato: FormatoId = body.formato === "1:1" || body.formato === "9:16" ? body.formato : "4:5";
   const prompts = promptsFotos(fotoTipo, {
     producto: producto.nombre,
+    ficha: fichaDe(producto),
     escena: body.escena || "estudio",
     escenaPersonalizada: body.escenaPersonalizada,
     persona: body.persona || "ninguna",
