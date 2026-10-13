@@ -557,6 +557,32 @@ export default function EstudioIA({
     setOcupado(null);
   }
 
+  // "Más como esta": 2 versiones nuevas con el mismo estilo que un resultado.
+  async function masComoEsta(t: Trabajo) {
+    if (!t.media) return;
+    setError("");
+    setOcupado(`variar-${t.id}`);
+    try {
+      const form = new FormData();
+      form.append(
+        "datos",
+        JSON.stringify({ productoId, modeloId: modeloGratis.id, variarDe: t.id, formato })
+      );
+      const urls = [t.media.url, ...seleccionadas.map((f) => f.url)].slice(0, 4);
+      const refs = await Promise.all(urls.map((u) => achicarFoto(u)));
+      refs.forEach((b, i) => form.append(`ref_${i}`, b, `ref${i}.jpg`));
+      const r = await fetch("/api/ia/gratis", { method: "POST", body: form });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "La IA gratis no pudo generar más opciones.");
+      if (data.aviso) setError(data.aviso);
+      await cargarTrabajos();
+      await onNuevos();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "La IA gratis no pudo generar más opciones.");
+    }
+    setOcupado(null);
+  }
+
   async function descartar(m: NonNullable<Trabajo["media"]>) {
     if (!confirm("¿Descartar este resultado? Se borra del producto.")) return;
     setOcupado(m.id);
@@ -1115,8 +1141,8 @@ export default function EstudioIA({
                 Así quedó · {resultados.length} versión{resultados.length === 1 ? "" : "es"}
               </p>
               <p className="text-xs text-gray-500">
-                Probá otras IA o estilos arriba: cada versión nueva se suma acá y no se borra nada
-                hasta que vos la descartes. Marcá las que te gusten (de cualquier IA) y publicalas
+                Tocá &quot;Más opciones como esta&quot; en la que te guste, o probá otras IA o estilos
+                arriba: cada versión nueva se suma acá y no se borra nada hasta que vos la descartes. Marcá las que te gusten (de cualquier IA) y publicalas
                 juntas.
               </p>
             </div>
@@ -1167,6 +1193,16 @@ export default function EstudioIA({
                     {new Date(t.createdAt).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}
                     {m.aprobado && <span className="text-green-700"> · ✓ aprobada</span>}
                   </p>
+                  {m.tipo === "FOTO" && cfActivo && (
+                    <button
+                      type="button"
+                      onClick={() => masComoEsta(t)}
+                      disabled={ocupado !== null || enviando}
+                      className="rounded-md border border-green-600 text-green-800 bg-green-50 text-xs font-semibold px-2 py-1 hover:bg-green-100 disabled:opacity-50"
+                    >
+                      {ocupado === `variar-${t.id}` ? "Buscando opciones..." : "↻ Más opciones como esta"}
+                    </button>
+                  )}
                   <div className="flex items-center justify-between gap-1">
                     <button
                       type="button"
@@ -1211,7 +1247,7 @@ export default function EstudioIA({
                   disabled={ocupado !== null || mezclaTipos || variosVideos}
                   className="rounded-md bg-gold text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
                 >
-                  {ocupado && ocupado !== "actualizar"
+                  {ocupado && ocupado !== "actualizar" && !ocupado.startsWith("variar-")
                     ? "Preparando..."
                     : elegidas.length > 1
                     ? `Publicar las ${elegidas.length} juntas (carrusel)`
