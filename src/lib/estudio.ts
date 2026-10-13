@@ -162,7 +162,8 @@ export type EstiloId =
   | "pop"
   | "editorial"
   | "flatlay"
-  | "detalle";
+  | "detalle"
+  | "dividida";
 
 export const ESTILOS: { id: EstiloId; nombre: string; en: string }[] = [
   {
@@ -210,6 +211,11 @@ export const ESTILOS: { id: EstiloId; nombre: string; en: string }[] = [
     nombre: "Detalle de cerca",
     en: "close-up detail shot that highlights texture, materials and quality, shallow depth of field",
   },
+  {
+    id: "dividida",
+    nombre: "Producto + modelo (dividida)",
+    en: "split-screen advertising layout: left half the product package in detail, right half a model using it",
+  },
 ];
 
 export const MAX_ESTILOS = 3;
@@ -237,6 +243,25 @@ type OpcionesFoto = {
   estilo?: EstiloId;
 } & TextoImagen;
 
+// Publicidad en dos mitades: a la izquierda el producto (con su envase) bien
+// detallado y a la derecha una modelo usándolo en el lugar elegido.
+function promptDividida(opciones: OpcionesFoto, escena: string, formato: string) {
+  const quien: PersonaId = opciones.persona === "ninguna" ? "mujer" : opciones.persona;
+  return [
+    "Create a professional split-screen social media advertising image for an online store, divided vertically into two halves on a clean light-gray backdrop.",
+    FIDELIDAD,
+    `Product: ${opciones.producto}.`,
+    "LEFT HALF: a detailed, sharp e-commerce packshot of the product exactly as in the reference, including its package or bag with all its printed text, labels and logos fully legible, front-facing, softly lit, with a subtle shadow so every detail and color is clearly visible.",
+    `RIGHT HALF: ${persona(quien, escena)} Scene: ${escena}. Natural, aspirational lifestyle photo with the product clearly visible while in use.`,
+    "Both halves share consistent lighting and color palette and read as one polished ad.",
+    `Compose it for ${formato}.`,
+    instruccionTexto(opciones),
+    opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function promptFoto(opciones: OpcionesFoto) {
   const escena = escenaEn(opciones.escena, opciones.escenaPersonalizada || "");
   const formato =
@@ -245,6 +270,7 @@ export function promptFoto(opciones: OpcionesFoto) {
       : opciones.formato === "1:1"
       ? "a square 1:1 format"
       : "a vertical 4:5 feed format";
+  if (opciones.estilo === "dividida") return promptDividida(opciones, escena, formato);
   return [
     "Create a professional, eye-catching social media advertising photo for an online store that makes people want to buy the product.",
     FIDELIDAD,
