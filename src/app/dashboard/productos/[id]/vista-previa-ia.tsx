@@ -32,6 +32,8 @@ type Cuadro = {
   filtro?: string;
   video?: boolean;
   final?: Media;
+  // Publicidad en dos mitades: producto a la izquierda, modelo a la derecha.
+  dividida?: boolean;
 };
 
 function Marco({
@@ -49,7 +51,20 @@ function Marco({
         className="relative w-full overflow-hidden rounded-lg border border-gray-200 shadow-sm"
         style={{ aspectRatio: cuadro.proporcion, background: cuadro.fondo }}
       >
-        {cuadro.foto && (
+        {cuadro.dividida && cuadro.foto && (
+          <div className="absolute inset-0 grid grid-cols-2 gap-1 p-1.5 bg-gray-200">
+            <div className="relative rounded bg-white/80 flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={cuadro.foto.url} alt="" className="max-w-[88%] max-h-[80%] object-contain drop-shadow-md" />
+            </div>
+            <div className="relative rounded overflow-hidden" style={{ background: cuadro.fondo }}>
+              <span className="absolute inset-x-0 bottom-2 mx-auto w-fit rounded-full bg-white/90 px-1.5 py-0.5 text-[9px] font-semibold text-gray-800">
+                {cuadro.persona === "hombre" ? "🧔 Modelo" : "👩 Modelo"}
+              </span>
+            </div>
+          </div>
+        )}
+        {cuadro.foto && !cuadro.dividida && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={cuadro.foto.url}
@@ -58,7 +73,7 @@ function Marco({
             style={cuadro.filtro ? { filter: cuadro.filtro } : undefined}
           />
         )}
-        {cuadro.persona && cuadro.persona !== "ninguna" && (
+        {cuadro.persona && cuadro.persona !== "ninguna" && !cuadro.dividida && (
           <span className="absolute bottom-2 left-2 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-gray-800">
             {cuadro.persona === "hombre" ? "🧔 Modelo IA usándolo" : "👩 Modelo IA usándolo"}
           </span>
@@ -156,11 +171,19 @@ export default function VistaPreviaIA({
           fondo: fondoEstilo(e.id),
           proporcion,
           persona: persona === "ninguna" ? "mujer" : persona,
+          dividida: e.id === "dividida",
         })
       );
     } else if (fotoTipo === "escena") {
       lista.forEach((e) =>
-        cuadros.push({ titulo: e.nombre, foto: base, fondo: fondoEstilo(e.id), proporcion })
+        cuadros.push({
+          titulo: e.nombre,
+          foto: base,
+          fondo: fondoEstilo(e.id),
+          proporcion,
+          dividida: e.id === "dividida",
+          persona: e.id === "dividida" ? (persona === "ninguna" ? "mujer" : persona) : undefined,
+        })
       );
     } else if (fotoTipo === "catalogo") {
       cuadros.push({ titulo: "Antes", foto: base, fondo: "#f3f4f6", proporcion: "1 / 1" });
