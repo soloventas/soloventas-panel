@@ -111,6 +111,7 @@ export default function VistaPreviaIA({
   etiquetaIA,
   gratis,
   videoConFotos = false,
+  estilos = [],
 }: {
   modo: "FOTO" | "VIDEO";
   fotoTipo: FotoTipoId;
@@ -127,23 +128,40 @@ export default function VistaPreviaIA({
   gratis: boolean;
   // Video armado en el panel con las fotos reales (sin IA).
   videoConFotos?: boolean;
+  // Estilos de publicidad marcados (una foto por estilo).
+  estilos?: { id: string; nombre: string }[];
 }) {
+  // Fondo del boceto según el estilo; si no cambia, se usa el del lugar.
+  const fondoEstilo = (id: string) =>
+    ({
+      oferta: "linear-gradient(135deg,#f97316 0%,#ec4899 55%,#8b5cf6 100%)",
+      lujo: "radial-gradient(circle at 50% 35%,#3f3320 0%,#0b0b0b 70%)",
+      minimalista: "linear-gradient(180deg,#faf7f2 0%,#ece6dc 100%)",
+      pop: "linear-gradient(135deg,#fde047 0%,#f472b6 50%,#22d3ee 100%)",
+      editorial: "linear-gradient(180deg,#d6d3d1 0%,#78716c 100%)",
+      flatlay: "repeating-linear-gradient(45deg,#f5f0e8 0 14px,#efe8dc 14px 28px)",
+    })[id] || FONDOS[escena];
+  const lista = estilos.length ? estilos : [{ id: "publicidad", nombre: "Campaña premium" }];
   const base = fotos[0];
   const proporcion = PROPORCION[formato];
   const cuadros: Cuadro[] = [];
 
   if (modo === "FOTO") {
     if (fotoTipo === "pack") {
-      cuadros.push({ titulo: "Foto 1 · producto real", foto: base, fondo: FONDOS.estudio, proporcion });
-      cuadros.push({
-        titulo: "Foto 2 · con modelo",
-        foto: base,
-        fondo: FONDOS[escena],
-        proporcion,
-        persona: persona === "ninguna" ? "mujer" : persona,
-      });
+      cuadros.push({ titulo: "Producto real", foto: base, fondo: FONDOS.estudio, proporcion });
+      lista.forEach((e) =>
+        cuadros.push({
+          titulo: `Con modelo · ${e.nombre}`,
+          foto: base,
+          fondo: fondoEstilo(e.id),
+          proporcion,
+          persona: persona === "ninguna" ? "mujer" : persona,
+        })
+      );
     } else if (fotoTipo === "escena") {
-      cuadros.push({ titulo: "Producto en el lugar", foto: base, fondo: FONDOS[escena], proporcion });
+      lista.forEach((e) =>
+        cuadros.push({ titulo: e.nombre, foto: base, fondo: fondoEstilo(e.id), proporcion })
+      );
     } else if (fotoTipo === "catalogo") {
       cuadros.push({ titulo: "Antes", foto: base, fondo: "#f3f4f6", proporcion: "1 / 1" });
       cuadros.push({ titulo: "Después · fondo blanco", foto: base, fondo: "#ffffff", proporcion: "1 / 1" });
@@ -197,7 +215,11 @@ export default function VistaPreviaIA({
       </div>
       <div
         className={`grid gap-3 ${
-          cuadros.length > 1 ? "grid-cols-2 max-w-md" : "grid-cols-1 max-w-[220px]"
+          cuadros.length > 2
+            ? "grid-cols-2 sm:grid-cols-4"
+            : cuadros.length > 1
+            ? "grid-cols-2 max-w-md"
+            : "grid-cols-1 max-w-[220px]"
         }`}
       >
         {cuadros.map((c) => (
