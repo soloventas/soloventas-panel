@@ -98,8 +98,8 @@ export async function GET(req: NextRequest) {
   const trabajos = await prisma.trabajoIA.findMany({
     where: { productoId },
     orderBy: { createdAt: "desc" },
-    take: 20,
-    select: { id: true, tipo: true, estado: true, error: true, createdAt: true, mediaId: true },
+    take: 40,
+    select: { id: true, tipo: true, estado: true, error: true, createdAt: true, mediaId: true, modelo: true },
   });
   // Sumamos la foto/video resultante para mostrar la vista previa.
   const ids = trabajos.map((t) => t.mediaId).filter((id): id is string => Boolean(id));
