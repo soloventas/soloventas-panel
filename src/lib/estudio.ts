@@ -16,6 +16,46 @@ export type PersonaId = "mujer" | "hombre" | "ninguna";
 export type FormatoId = "1:1" | "4:5" | "9:16";
 export type VideoTipoId = "giro" | "persona" | "colores";
 export type CalidadId = "estandar" | "premium";
+export type FotoTipoId = "pack" | "escena" | "catalogo" | "mejorar";
+
+// Herramientas de edición de foto. "pack" es la principal: siempre sale el
+// producto real + una persona usándolo, para publicarlas juntas.
+export const FOTO_TIPOS: {
+  id: FotoTipoId;
+  nombre: string;
+  ayuda: string;
+  usaEscena: boolean;
+  usaPersona: boolean;
+}[] = [
+  {
+    id: "pack",
+    nombre: "⭐ Producto real + modelo",
+    ayuda: "Salen 2 fotos para carrusel: el producto solo y una persona usándolo en el lugar elegido. Es la que mejor vende.",
+    usaEscena: true,
+    usaPersona: true,
+  },
+  {
+    id: "escena",
+    nombre: "Producto en un lugar",
+    ayuda: "El producto solo, ambientado en el lugar que elijas, sin personas.",
+    usaEscena: true,
+    usaPersona: false,
+  },
+  {
+    id: "catalogo",
+    nombre: "Fondo blanco (catálogo / web)",
+    ayuda: "Saca el fondo y deja el producto sobre blanco puro, ideal para la tienda online y MercadoLibre.",
+    usaEscena: false,
+    usaPersona: false,
+  },
+  {
+    id: "mejorar",
+    nombre: "Mejorar la foto",
+    ayuda: "Misma foto pero con mejor luz, nitidez y colores, sin cambiar el producto ni el encuadre.",
+    usaEscena: false,
+    usaPersona: false,
+  },
+];
 
 export const ESCENAS: { id: EscenaId; nombre: string; en: string }[] = [
   {
@@ -146,6 +186,61 @@ export function promptsPackFoto(opciones: {
     {
       titulo: "Foto 2 · Con modelo",
       prompt: promptFoto({ ...opciones, persona }),
+    },
+  ];
+}
+
+const SIN_EXTRAS =
+  "Output one single photo only. No added text, captions, prices, arrows, watermarks or extra logos.";
+
+// Arma las instrucciones según la herramienta de foto elegida.
+export function promptsFotos(
+  tipo: FotoTipoId,
+  opciones: {
+    producto: string;
+    escena: EscenaId;
+    escenaPersonalizada?: string;
+    persona: PersonaId;
+    formato: FormatoId;
+    extra?: string;
+  }
+): { titulo: string; prompt: string }[] {
+  const extra = opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "";
+  if (tipo === "pack") return promptsPackFoto(opciones);
+  if (tipo === "escena") {
+    return [{ titulo: "Producto en el lugar", prompt: promptFoto({ ...opciones, persona: "ninguna" }) }];
+  }
+  if (tipo === "catalogo") {
+    return [
+      {
+        titulo: "Fondo blanco",
+        prompt: [
+          "Turn this into a clean e-commerce catalog photo.",
+          FIDELIDAD,
+          `Product: ${opciones.producto}.`,
+          "Remove the original background completely and place the product centered on a pure white (#FFFFFF) seamless background, with a soft natural shadow under it. Even, bright studio lighting, sharp focus, true-to-life colors.",
+          "Square 1:1 composition with some margin around the product.",
+          SIN_EXTRAS,
+          extra,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      },
+    ];
+  }
+  return [
+    {
+      titulo: "Foto mejorada",
+      prompt: [
+        "Enhance this product photo for online sales while keeping the same composition, framing and background.",
+        FIDELIDAD,
+        `Product: ${opciones.producto}.`,
+        "Improve lighting and exposure, increase sharpness and detail, correct white balance, make colors vibrant but true to life, remove dust, noise and small imperfections.",
+        SIN_EXTRAS,
+        extra,
+      ]
+        .filter(Boolean)
+        .join(" "),
     },
   ];
 }

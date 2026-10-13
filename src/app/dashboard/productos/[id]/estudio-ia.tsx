@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "./media-manager";
 import {
   ESCENAS,
+  FOTO_TIPOS,
   FORMATOS,
   PERSONAS,
   VIDEO_TIPOS,
   promptVideo,
-  promptsPackFoto,
+  promptsFotos,
   type EscenaId,
+  type FotoTipoId,
   type FormatoId,
   type PersonaId,
   type VideoTipoId,
@@ -78,6 +80,7 @@ export default function EstudioIA({
   const [escenaPersonalizada, setEscenaPersonalizada] = useState("");
   const [persona, setPersona] = useState<PersonaId>("mujer");
   const [formato, setFormato] = useState<FormatoId>("4:5");
+  const [fotoTipo, setFotoTipo] = useState<FotoTipoId>("pack");
   const [videoTipo, setVideoTipo] = useState<VideoTipoId>("giro");
   const [duracion, setDuracion] = useState<5 | 10>(5);
   const [herramientaId, setHerramientaId] = useState<Record<Modo, string>>({
@@ -108,7 +111,7 @@ export default function EstudioIA({
   // publicarlas juntas como carrusel.
   const prompts = useMemo(() => {
     if (modo === "FOTO") {
-      return promptsPackFoto({ producto, escena, escenaPersonalizada, persona, formato, extra });
+      return promptsFotos(fotoTipo, { producto, escena, escenaPersonalizada, persona, formato, extra });
     }
     return [
       {
@@ -116,12 +119,16 @@ export default function EstudioIA({
         prompt: promptVideo({ producto, tipo: videoTipo, escena, escenaPersonalizada, persona, extra }),
       },
     ];
-  }, [modo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra]);
+  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra]);
 
   const herramientas = herramientasPara(modo);
   const herramienta = herramientas.find((h) => h.id === herramientaId[modo]) || herramientas[0];
   const modelo = buscarModelo(modo, modeloId[modo]);
-  const costo = costoTexto(modelo, modo, duracion);
+  const herramientaFoto = FOTO_TIPOS.find((f) => f.id === fotoTipo)!;
+  const usaEscena = modo === "VIDEO" || herramientaFoto.usaEscena;
+  const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona";
+  const cantidadFotos = modo === "FOTO" ? prompts.length : 0;
+  const costo = costoTexto(modelo, modo, duracion, cantidadFotos);
 
   const cargarTrabajos = useCallback(async () => {
     const r = await fetch(`/api/ia/estudio?productoId=${productoId}`, { cache: "no-store" });
@@ -171,7 +178,7 @@ export default function EstudioIA({
     if (seleccion.length === 0) return "Elegí al menos una foto de base.";
     if (modo === "VIDEO" && videoTipo === "colores" && seleccion.length < 2)
       return "Para el cambio de color elegí 2 fotos en distintos colores.";
-    if (escena === "personalizada" && !escenaPersonalizada.trim())
+    if (usaEscena && escena === "personalizada" && !escenaPersonalizada.trim())
       return "Describí el lugar que querés.";
     return null;
   })();
@@ -179,7 +186,11 @@ export default function EstudioIA({
   async function generar() {
     if (problema) return;
     const que =
-      modo === "FOTO" ? "2 fotos (producto real + con modelo)" : `un video de ${duracion} segundos`;
+      modo === "FOTO"
+        ? fotoTipo === "pack"
+          ? "2 fotos (producto real + con modelo)"
+          : `1 foto (${herramientaFoto.nombre.toLowerCase()})`
+        : `un video de ${duracion} segundos`;
     if (!confirm(`¿Generar ${que} con ${modelo.nombre}? Costo: ${costo}.`)) return;
     setError("");
     setEnviando(true);
@@ -191,6 +202,7 @@ export default function EstudioIA({
         tipo: modo,
         mediaIds: seleccion,
         modeloId: modelo.id,
+        fotoTipo,
         escena,
         escenaPersonalizada,
         persona,
@@ -278,6 +290,21 @@ export default function EstudioIA({
         </div>
       </div>
 
+      {/* Herramienta de foto */}
+      {modo === "FOTO" && (
+        <div>
+          <p className="text-sm font-medium mb-2">¿Qué querés hacer con la foto?</p>
+          <div className="flex flex-wrap gap-2">
+            {FOTO_TIPOS.map((f) => (
+              <Chip key={f.id} activo={fotoTipo === f.id} onClick={() => setFotoTipo(f.id)}>
+                {f.nombre}
+              </Chip>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-1.5">{herramientaFoto.ayuda}</p>
+        </div>
+      )}
+
       {/* Tipo de video */}
       {modo === "VIDEO" && (
         <div>
@@ -296,6 +323,7 @@ export default function EstudioIA({
       )}
 
       {/* Escena */}
+      {usaEscena && (
       <div>
         <p className="text-sm font-medium mb-2">Lugar / ambiente</p>
         <div className="flex flex-wrap gap-2">
@@ -314,9 +342,10 @@ export default function EstudioIA({
           />
         )}
       </div>
+      )}
 
       {/* Persona */}
-      {(modo === "FOTO" || videoTipo === "persona") && (
+      {usaPersona && (
         <div>
           <p className="text-sm font-medium mb-2">¿Quién aparece?</p>
           <div className="flex flex-wrap gap-2">
@@ -329,6 +358,7 @@ export default function EstudioIA({
           <p className="text-xs text-gray-500 mt-1.5">
             Siempre son personas adultas creadas por IA, que no existen.
             {modo === "FOTO" &&
+              fotoTipo === "pack" &&
               " Se arman 2 fotos: el producto real solo y el producto usado por la modelo en el lugar elegido."}
           </p>
         </div>
@@ -381,13 +411,13 @@ export default function EstudioIA({
                 activo={herramienta.id === h.id}
                 onClick={() => setHerramientaId((prev) => ({ ...prev, [modo]: h.id }))}
               >
-                {h.nombre}
+                {h.recomendado?.includes(modo) ? `⭐ ${h.nombre}` : h.nombre}
               </Chip>
             ))}
           </div>
           <p className="text-xs text-green-900/80 mt-1.5">
-            {herramienta.nombre} ({herramienta.empresa}) · {herramienta.plan}. Los límites gratis los
-            pone cada empresa y pueden cambiar.
+            {herramienta.nombre} ({herramienta.empresa}) · {herramienta.plan}. ⭐ = la que mejor deja el
+            producto para vender. Los límites gratis los pone cada empresa y pueden cambiar.
           </p>
         </div>
         <ol className="text-sm text-green-950 list-decimal pl-5 flex flex-col gap-1">
@@ -412,14 +442,14 @@ export default function EstudioIA({
               {herramienta.nombre}
             </a>
             . {herramienta.pasos[modo]}
-            {modo === "FOTO" &&
+            {cantidadFotos === 2 &&
               " Para la segunda foto, pegá la instrucción 2 en el mismo chat o con la misma foto."}
           </li>
-          <li>Descargá {modo === "FOTO" ? "las 2 fotos" : "el resultado"} que te devuelve.</li>
+          <li>Descargá {cantidadFotos === 2 ? "las 2 fotos" : "el resultado"} que te devuelve.</li>
           <li>
             {modo === "FOTO" ? "Subilas" : "Subilo"} arriba en <b>Fotos y videos</b>, tildando{" "}
             <i>&quot;Son fotos o videos generados con IA&quot;</i>. Después las revisás y las aprobás.
-            {modo === "FOTO" &&
+            {cantidadFotos === 2 &&
               " Para publicarlas juntas elegí “Carrusel” en Publicar en redes."}
           </li>
         </ol>
@@ -468,7 +498,7 @@ export default function EstudioIA({
                 activo={modelo.id === m.id}
                 onClick={() => setModeloId((prev) => ({ ...prev, [modo]: m.id }))}
               >
-                {m.nombre}
+                {m.recomendado ? `⭐ ${m.nombre}` : m.nombre}
               </Chip>
             ))}
           </div>
@@ -484,7 +514,13 @@ export default function EstudioIA({
               disabled={Boolean(problema) || enviando}
               className="rounded-md bg-violet-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
             >
-              {enviando ? "Enviando..." : modo === "FOTO" ? "Generar 2 fotos" : "Generar video"}
+              {enviando
+                ? "Enviando..."
+                : modo === "FOTO"
+                ? cantidadFotos === 2
+                  ? "Generar 2 fotos"
+                  : "Generar foto"
+                : "Generar video"}
             </button>
             <span className="text-xs text-violet-900">
               Costo: {costo}
@@ -496,7 +532,11 @@ export default function EstudioIA({
             Genera todo desde el panel con un clic, sin salir, con la IA que elijas. Para activarlo,
             cargá la clave <code className="bg-white/70 px-1 rounded">FAL_KEY</code> en Vercel (cuenta
             en fal.ai, pago por uso). Con {modelo.nombre}: {costo}
-            {modo === "FOTO" ? " por las 2 fotos" : ` por un video de ${duracion} s`}.
+            {modo === "FOTO"
+              ? cantidadFotos === 2
+                ? " por las 2 fotos"
+                : " por la foto"
+              : ` por un video de ${duracion} s`}.
           </p>
         )}
 

@@ -16,6 +16,7 @@ export type HerramientaGratis = {
   url: string;
   modos: ModoIA[];
   plan: string; // cómo es lo gratis, en pocas palabras
+  recomendado?: ModoIA[]; // la que mejor deja el producto para vender
   pasos: Record<ModoIA, string>;
 };
 
@@ -27,6 +28,7 @@ export const HERRAMIENTAS_GRATIS: HerramientaGratis[] = [
     url: "https://gemini.google.com/app",
     modos: ["FOTO", "VIDEO"],
     plan: "Gratis con tu cuenta de Google (con límite diario)",
+    recomendado: ["FOTO"],
     pasos: {
       FOTO: "Entrá con tu cuenta de Google, adjuntá la foto con el botón + y pegá la instrucción.",
       VIDEO: "Entrá con tu cuenta de Google, elegí la opción de video (Veo), adjuntá la foto y pegá la instrucción.",
@@ -39,6 +41,7 @@ export const HERRAMIENTAS_GRATIS: HerramientaGratis[] = [
     url: "https://aistudio.google.com/",
     modos: ["FOTO", "VIDEO"],
     plan: "Gratis con tu cuenta de Google (con límite)",
+    recomendado: ["VIDEO"],
     pasos: {
       FOTO: "Elegí un modelo de imagen (Nano Banana), adjuntá la foto y pegá la instrucción.",
       VIDEO: "Elegí generar video (Veo), adjuntá la foto y pegá la instrucción.",
@@ -140,10 +143,84 @@ export const HERRAMIENTAS_GRATIS: HerramientaGratis[] = [
       VIDEO: "Subí la foto o un video del producto y pegá la instrucción en el chat del editor.",
     },
   },
+  {
+    id: "canva",
+    nombre: "Canva",
+    empresa: "Canva",
+    url: "https://www.canva.com/",
+    modos: ["FOTO", "VIDEO"],
+    plan: "Plan gratis; algunas funciones de IA tienen límite o son de Canva Pro",
+    pasos: {
+      FOTO: "Creá un diseño, subí la foto y usá las apps de IA (Magic Edit, quitar fondo, Magic Media) pegando la instrucción.",
+      VIDEO: "Creá un video, subí las fotos y usá Magic Media o las plantillas animadas; pegá la instrucción en la IA.",
+    },
+  },
+  {
+    id: "adobe",
+    nombre: "Adobe Express / Firefly",
+    empresa: "Adobe",
+    url: "https://new.express.adobe.com/",
+    modos: ["FOTO", "VIDEO"],
+    plan: "Plan gratis con créditos de IA mensuales",
+    pasos: {
+      FOTO: "Subí la foto y usá quitar fondo, relleno generativo o crear imagen pegando la instrucción.",
+      VIDEO: "Elegí crear video, subí las fotos y usá la IA de Firefly pegando la instrucción.",
+    },
+  },
+  {
+    id: "capcut",
+    nombre: "CapCut",
+    empresa: "ByteDance (TikTok)",
+    url: "https://www.capcut.com/",
+    modos: ["FOTO", "VIDEO"],
+    plan: "Editor gratis; algunas funciones de IA son de CapCut Pro",
+    pasos: {
+      FOTO: "Subí la foto y usá quitar fondo, mejorar calidad o fondo con IA.",
+      VIDEO: "Subí las fotos, armá el video con plantillas o con la IA de video y pegá la instrucción. Ideal para TikTok y Reels.",
+    },
+  },
+  {
+    id: "photoroom",
+    nombre: "Photoroom",
+    empresa: "Photoroom",
+    url: "https://www.photoroom.com/",
+    modos: ["FOTO"],
+    plan: "Plan gratis con límites (las fotos pueden salir con marca de agua)",
+    pasos: {
+      FOTO: "Subí la foto: saca el fondo solo. Después elegí un fondo con IA o pegá la instrucción del lugar.",
+      VIDEO: "",
+    },
+  },
+  {
+    id: "pika",
+    nombre: "Pika",
+    empresa: "Pika Labs",
+    url: "https://pika.art/",
+    modos: ["VIDEO"],
+    plan: "Créditos gratis limitados (mirá su web)",
+    pasos: {
+      FOTO: "",
+      VIDEO: "Subí la foto, pegá la instrucción y generá el video.",
+    },
+  },
+  {
+    id: "luma",
+    nombre: "Luma Dream Machine",
+    empresa: "Luma AI",
+    url: "https://dream-machine.lumalabs.ai/",
+    modos: ["FOTO", "VIDEO"],
+    plan: "Prueba gratis limitada (mirá su web)",
+    pasos: {
+      FOTO: "Subí la foto como referencia y pegá la instrucción.",
+      VIDEO: "Subí la foto, pegá la instrucción y generá el video.",
+    },
+  },
 ];
 
 export function herramientasPara(modo: ModoIA) {
-  return HERRAMIENTAS_GRATIS.filter((h) => h.modos.includes(modo));
+  const lista = HERRAMIENTAS_GRATIS.filter((h) => h.modos.includes(modo));
+  // La recomendada va primero.
+  return [...lista.filter((h) => h.recomendado?.includes(modo)), ...lista.filter((h) => !h.recomendado?.includes(modo))];
 }
 
 // --- Modo automático (pago, vía fal.ai) ---
@@ -166,6 +243,7 @@ export type ModeloAuto = {
   nota: string;
   // Si el modelo usa la foto final (cambio de color).
   usaFotoFinal?: boolean;
+  recomendado?: boolean; // la que mejor deja el producto para vender
   armar: (d: DatosPedido) => Record<string, unknown>;
 };
 
@@ -220,7 +298,8 @@ export const MODELOS_AUTO: ModeloAuto[] = [
     modo: "FOTO",
     endpoint: "fal-ai/nano-banana-pro/edit",
     costo: 0.15,
-    nota: "La de mejor calidad de Gemini.",
+    nota: "La de mejor calidad: la que más respeta el producto real. Recomendada para vender.",
+    recomendado: true,
     armar: fotoNanoBanana,
   },
   {
@@ -257,8 +336,9 @@ export const MODELOS_AUTO: ModeloAuto[] = [
     modo: "VIDEO",
     endpoint: "fal-ai/kling-video/v3/pro/image-to-video",
     costo: 0.112,
-    nota: "Más nitidez y movimientos más suaves.",
+    nota: "Más nitidez y movimientos más suaves. Recomendada para vender.",
     usaFotoFinal: true,
+    recomendado: true,
     armar: videoKling,
   },
   {
@@ -286,8 +366,8 @@ export const MODELOS_AUTO: ModeloAuto[] = [
 ];
 
 export const MODELO_AUTO_DEFECTO: Record<ModoIA, string> = {
-  FOTO: "nano-banana",
-  VIDEO: "kling-estandar",
+  FOTO: "nano-banana-pro",
+  VIDEO: "kling-pro",
 };
 
 export function modelosPara(modo: ModoIA) {
@@ -296,15 +376,16 @@ export function modelosPara(modo: ModoIA) {
 
 export function buscarModelo(modo: ModoIA, id?: string, calidad?: CalidadId) {
   const lista = modelosPara(modo);
+  if (id === "recomendado") return lista.find((m) => m.recomendado) || lista[0];
   const elegido = lista.find((m) => m.id === id);
   if (elegido) return elegido;
   // Compatibilidad con el selector viejo de calidad (estándar / premium).
-  if (calidad === "premium") return lista.find((m) => m.id === (modo === "FOTO" ? "nano-banana-pro" : "kling-pro"))!;
+  if (calidad === "estandar") return lista.find((m) => m.id === (modo === "FOTO" ? "nano-banana" : "kling-estandar"))!;
   return lista.find((m) => m.id === MODELO_AUTO_DEFECTO[modo])!;
 }
 
-export function costoTexto(m: ModeloAuto, modo: ModoIA, duracion: number) {
+export function costoTexto(m: ModeloAuto, modo: ModoIA, duracion: number, fotos = 2) {
   if (m.costo === null) return "precio según fal.ai";
-  const total = modo === "FOTO" ? m.costo * 2 : m.costo * duracion;
+  const total = modo === "FOTO" ? m.costo * fotos : m.costo * duracion;
   return `≈ US$ ${total.toFixed(2)}`;
 }

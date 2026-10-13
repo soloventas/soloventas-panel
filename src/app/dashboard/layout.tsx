@@ -34,6 +34,12 @@ export default async function DashboardLayout({
             Catálogo de productos
           </Link>
           <Link
+            href="/dashboard/edicion"
+            className="px-3 py-2 rounded-md hover:bg-white/10"
+          >
+            Edición de foto y video
+          </Link>
+          <Link
             href="/dashboard/categorias"
             className="px-3 py-2 rounded-md hover:bg-white/10"
           >

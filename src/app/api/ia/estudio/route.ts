@@ -6,8 +6,9 @@ import { maximoPorTipo } from "@/lib/media";
 import { enviarAFal, estadoFal, falConfigurado, resultadoFal } from "@/lib/fal";
 import {
   promptVideo,
-  promptsPackFoto,
+  promptsFotos,
   type CalidadId,
+  type FotoTipoId,
   type EscenaId,
   type FormatoId,
   type PersonaId,
@@ -119,6 +120,7 @@ export async function POST(req: NextRequest) {
     mediaIds?: string[];
     calidad?: CalidadId;
     modeloId?: string;
+    fotoTipo?: FotoTipoId;
     escena?: EscenaId;
     escenaPersonalizada?: string;
     persona?: PersonaId;
@@ -132,8 +134,7 @@ export async function POST(req: NextRequest) {
   if (!productoId || (tipo !== "FOTO" && tipo !== "VIDEO")) {
     return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
   }
-  const calidad: CalidadId = body.calidad === "premium" ? "premium" : "estandar";
-  const modelo = buscarModelo(tipo, body.modeloId, calidad);
+  const modelo = buscarModelo(tipo, body.modeloId, body.calidad);
 
   const producto = await prisma.producto.findUnique({
     where: { id: productoId },
@@ -146,14 +147,18 @@ export async function POST(req: NextRequest) {
     prisma.mediaProducto.count({ where: { productoId, tipo } }),
     prisma.trabajoIA.count({ where: { productoId, tipo, estado: "PENDIENTE" } }),
   ]);
-  // Las fotos salen de a 2 (producto real + con modelo).
-  const nuevos = tipo === "FOTO" ? 2 : 1;
+  const fotoTipo: FotoTipoId =
+    body.fotoTipo === "escena" || body.fotoTipo === "catalogo" || body.fotoTipo === "mejorar"
+      ? body.fotoTipo
+      : "pack";
+  // El pack sale de a 2 fotos (producto real + con modelo).
+  const nuevos = tipo === "FOTO" && fotoTipo === "pack" ? 2 : 1;
   if (existentes + enCurso + nuevos > maximoPorTipo(tipo)) {
     return NextResponse.json(
       {
         error:
           tipo === "FOTO"
-            ? "No hay lugar para 2 fotos más (máximo 20). Borrá alguna para generar más."
+            ? `No hay lugar para ${nuevos === 2 ? "2 fotos más" : "otra foto"} (máximo 20). Borrá alguna para generar más.`
             : "Ya llegaste al máximo de 5 videos. Borrá alguno para generar más.",
       },
       { status: 400 }
@@ -181,7 +186,7 @@ export async function POST(req: NextRequest) {
   const duracion = body.duracion === 10 ? 10 : 5;
 
   if (tipo === "FOTO") {
-    const pack = promptsPackFoto({
+    const pack = promptsFotos(fotoTipo, {
       producto: producto.nombre,
       escena,
       escenaPersonalizada: body.escenaPersonalizada,
