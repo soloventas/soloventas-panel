@@ -152,16 +152,93 @@ function escenaEn(id: EscenaId, personalizada: string) {
   return ESCENAS.find((e) => e.id === id)?.en || "";
 }
 
-export function promptFoto(opciones: {
+// Estilos de publicidad: se pueden marcar varios y sale una edición por cada uno.
+export type EstiloId =
+  | "publicidad"
+  | "lifestyle"
+  | "oferta"
+  | "minimalista"
+  | "lujo"
+  | "pop"
+  | "editorial"
+  | "flatlay"
+  | "detalle";
+
+export const ESTILOS: { id: EstiloId; nombre: string; en: string }[] = [
+  {
+    id: "publicidad",
+    nombre: "Campaña premium",
+    en: "high-end commercial advertising campaign look, bold hero composition, dramatic studio-quality lighting with soft rim light, rich contrast, polished like a magazine ad",
+  },
+  {
+    id: "lifestyle",
+    nombre: "Lifestyle natural",
+    en: "authentic lifestyle photography, natural candid moment, warm natural light, relatable everyday mood",
+  },
+  {
+    id: "oferta",
+    nombre: "Oferta llamativa",
+    en: "eye-catching promotional look, vibrant saturated background colors, energetic dynamic composition and bold color blocking that stops the scroll in a social feed",
+  },
+  {
+    id: "minimalista",
+    nombre: "Minimalista elegante",
+    en: "minimalist elegant aesthetic, lots of clean negative space, soft neutral or pastel tones, refined balanced composition",
+  },
+  {
+    id: "lujo",
+    nombre: "Lujo / fondo oscuro",
+    en: "luxury dark mood, deep black background, warm golden accent lighting, sophisticated and exclusive feel",
+  },
+  {
+    id: "pop",
+    nombre: "Pop juvenil",
+    en: "bold Gen Z pop style, playful bright colors, trendy social media aesthetic, fun energetic vibe",
+  },
+  {
+    id: "editorial",
+    nombre: "Revista de moda",
+    en: "fashion editorial magazine style, artistic framing, cinematic color grading",
+  },
+  {
+    id: "flatlay",
+    nombre: "Vista desde arriba",
+    en: "top-down flat lay composition, the product arranged neatly with a few complementary props on a styled surface",
+  },
+  {
+    id: "detalle",
+    nombre: "Detalle de cerca",
+    en: "close-up detail shot that highlights texture, materials and quality, shallow depth of field",
+  },
+];
+
+export const MAX_ESTILOS = 3;
+
+export function limpiarEstilos(lista?: unknown): EstiloId[] {
+  const ids = Array.isArray(lista) ? lista : [];
+  const validos = ESTILOS.map((e) => e.id).filter((id) => ids.includes(id));
+  return (validos.length ? validos : ["publicidad"]).slice(0, MAX_ESTILOS) as EstiloId[];
+}
+
+function estiloEn(id?: EstiloId) {
+  return (
+    ESTILOS.find((e) => e.id === id)?.en ||
+    "modern, aspirational, high-end lifestyle photography, realistic lighting and shadows, sharp focus on the product, shallow depth of field, vibrant but natural colors"
+  );
+}
+
+type OpcionesFoto = {
   producto: string;
   escena: EscenaId;
   escenaPersonalizada?: string;
   persona: PersonaId;
   formato: FormatoId;
   extra?: string;
-} & TextoImagen) {
+  estilo?: EstiloId;
+} & TextoImagen;
+
+export function promptFoto(opciones: OpcionesFoto) {
   const escena = escenaEn(opciones.escena, opciones.escenaPersonalizada || "");
-  const textoPedido = instruccionTexto(opciones);
   const formato =
     opciones.formato === "9:16"
       ? "a vertical 9:16 story format"
@@ -174,64 +251,56 @@ export function promptFoto(opciones: {
     `Product: ${opciones.producto}.`,
     `Scene: ${escena}.`,
     persona(opciones.persona, escena),
-    "Style: modern, aspirational, high-end lifestyle photography, realistic lighting and shadows, sharp focus on the product, shallow depth of field, vibrant but natural colors.",
+    `Style: ${estiloEn(opciones.estilo)}.`,
     `Compose it for ${formato}, keeping the product clearly visible and prominent.`,
-    textoPedido
-      ? "Output one single photo only. No prices, arrows, page numbers, carousel or app interface elements, watermarks or extra logos."
-      : "Output one single photo only. No added text, captions, prices, arrows, page numbers, carousel or app interface elements, watermarks or extra logos.",
-    textoPedido,
+    instruccionTexto(opciones),
     opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
   ]
     .filter(Boolean)
     .join(" ");
 }
 
-// Pack de 2 fotos para publicar como carrusel: 1) el producto real solo, en
-// estudio; 2) el producto usado por una persona IA en el lugar elegido.
-export function promptsPackFoto(opciones: {
-  producto: string;
-  escena: EscenaId;
-  escenaPersonalizada?: string;
-  persona: PersonaId;
-  formato: FormatoId;
-  extra?: string;
-} & TextoImagen) {
+function nombreEstilo(id: EstiloId) {
+  return ESTILOS.find((e) => e.id === id)?.nombre || id;
+}
+
+// Pack para carrusel: el producto real solo, en estudio, y una foto con
+// modelo por cada estilo elegido.
+export function promptsPackFoto(opciones: OpcionesFoto, estilos: EstiloId[] = ["publicidad"]) {
   const persona: PersonaId = opciones.persona === "ninguna" ? "mujer" : opciones.persona;
   return [
     {
-      titulo: "Foto 1 · Producto real",
-      prompt: promptFoto({ ...opciones, escena: "estudio", escenaPersonalizada: "", persona: "ninguna" }),
+      titulo: "Producto real",
+      prompt: promptFoto({
+        ...opciones,
+        escena: "estudio",
+        escenaPersonalizada: "",
+        persona: "ninguna",
+        estilo: estilos[0],
+      }),
     },
-    {
-      titulo: "Foto 2 · Con modelo",
-      prompt: promptFoto({ ...opciones, persona }),
-    },
+    ...estilos.map((estilo) => ({
+      titulo: `Con modelo · ${nombreEstilo(estilo)}`,
+      prompt: promptFoto({ ...opciones, persona, estilo }),
+    })),
   ];
 }
 
-const SIN_EXTRAS =
-  "Output one single photo only. No added text, captions, prices, arrows, watermarks or extra logos.";
-
-// Arma las instrucciones según la herramienta de foto elegida.
+// Arma las instrucciones según la herramienta de foto elegida. En "pack" y
+// "escena" sale una foto por cada estilo de publicidad marcado.
 export function promptsFotos(
   tipo: FotoTipoId,
-  opciones: {
-    producto: string;
-    escena: EscenaId;
-    escenaPersonalizada?: string;
-    persona: PersonaId;
-    formato: FormatoId;
-    extra?: string;
-  } & TextoImagen
+  opciones: OpcionesFoto & { estilos?: EstiloId[] }
 ): { titulo: string; prompt: string }[] {
+  const estilos = limpiarEstilos(opciones.estilos);
   const extra = opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "";
   const textoPedido = instruccionTexto(opciones);
-  const sinExtras = textoPedido
-    ? "Output one single photo only. No prices, arrows, watermarks or extra logos."
-    : SIN_EXTRAS;
-  if (tipo === "pack") return promptsPackFoto(opciones);
+  if (tipo === "pack") return promptsPackFoto(opciones, estilos);
   if (tipo === "escena") {
-    return [{ titulo: "Producto en el lugar", prompt: promptFoto({ ...opciones, persona: "ninguna" }) }];
+    return estilos.map((estilo) => ({
+      titulo: `En el lugar · ${nombreEstilo(estilo)}`,
+      prompt: promptFoto({ ...opciones, persona: "ninguna", estilo }),
+    }));
   }
   if (tipo === "catalogo") {
     return [
@@ -243,7 +312,6 @@ export function promptsFotos(
           `Product: ${opciones.producto}.`,
           "Remove the original background completely and place the product centered on a pure white (#FFFFFF) seamless background, with a soft natural shadow under it. Even, bright studio lighting, sharp focus, true-to-life colors.",
           "Square 1:1 composition with some margin around the product.",
-          sinExtras,
           textoPedido,
           extra,
         ]
@@ -260,7 +328,6 @@ export function promptsFotos(
         FIDELIDAD,
         `Product: ${opciones.producto}.`,
         "Improve lighting and exposure, increase sharpness and detail, correct white balance, make colors vibrant but true to life, remove dust, noise and small imperfections.",
-        sinExtras,
         textoPedido,
         extra,
       ]
@@ -293,7 +360,6 @@ export function promptVideo(opciones: {
     base,
     `Product: ${opciones.producto}.`,
     "The product must remain exactly identical to the reference image: same shape, colors, logos and details throughout the whole video.",
-    textoPedido ? "No watermarks." : "No added text, no watermarks.",
     textoPedido,
     opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
   ]
