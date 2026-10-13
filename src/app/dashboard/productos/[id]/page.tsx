@@ -1,10 +1,8 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import EditarProductoForm from "./editar-form";
-import SeccionMedios from "./seccion-medios";
-import { iaConfigurada } from "@/lib/ia";
-import { falConfigurado } from "@/lib/fal";
-import { cfConfigurado } from "@/lib/cloudflare-ia";
+import Link from "next/link";
+import MediaManager from "./media-manager";
 
 export default async function EditarProductoPage({
   params,
@@ -29,16 +27,6 @@ export default async function EditarProductoPage({
     select: { id: true, tipo: true, url: true, nombre: true, origen: true, aprobado: true },
   });
 
-  const cuentas = await prisma.integracionRed.findMany({
-    where: { clave: { in: ["instagram", "facebook", "tiktok"] } },
-    select: { clave: true, nombre: true },
-  });
-  const redes = {
-    instagram: cuentas.find((c) => c.clave === "instagram")?.nombre ?? null,
-    facebook: cuentas.find((c) => c.clave === "facebook")?.nombre ?? null,
-    tiktok: cuentas.find((c) => c.clave === "tiktok")?.nombre ?? null,
-  };
-
   return (
     <div className="max-w-2xl">
       <h1 className="text-2xl font-semibold text-navy mb-1">
@@ -48,21 +36,10 @@ export default async function EditarProductoPage({
 
       {searchParams.nuevo && (
         <div className="mb-5 rounded-md bg-green-50 text-green-800 text-sm px-4 py-3">
-          Producto creado. Ahora cargale sus fotos y videos.
+          Producto creado. Ahora cargale sus fotos (más abajo).
         </div>
       )}
 
-      <div className="mb-5">
-        <SeccionMedios
-          productoId={producto.id}
-          inicial={media}
-          redes={redes}
-          iaActiva={iaConfigurada()}
-          falActivo={falConfigurado()}
-          cfActivo={cfConfigurado()}
-          producto={producto.nombre}
-        />
-      </div>
       <EditarProductoForm
         producto={{
           id: producto.id,
@@ -99,6 +76,23 @@ export default async function EditarProductoPage({
           stock: v.stock,
         }))}
       />
+
+      <div className="mt-6">
+        <MediaManager productoId={producto.id} inicial={media} conIA={false} />
+      </div>
+
+      <Link
+        href={`/dashboard/edicion?producto=${producto.id}`}
+        className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm hover:border-navy"
+      >
+        <span>
+          <b className="text-navy">Edición de foto y video</b>
+          <span className="block text-xs text-gray-500">
+            Mejorar fotos con IA, hacer videos y publicar en redes.
+          </span>
+        </span>
+        <span className="text-navy">→</span>
+      </Link>
     </div>
   );
 }
