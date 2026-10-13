@@ -24,6 +24,7 @@ import { achicarFoto, armarVideo, type VideoArmado } from "@/lib/video-navegador
 import {
   buscarModelo,
   costoTexto,
+  MODELOS_AUTO,
   herramientasPara,
   modelosPara,
 } from "@/lib/proveedores-ia";
@@ -36,8 +37,20 @@ type Trabajo = {
   estado: "PENDIENTE" | "LISTO" | "ERROR";
   error: string | null;
   createdAt: string;
+  modelo?: string;
   media: { id: string; url: string; tipo: Modo; aprobado: boolean } | null;
 };
+
+// Nombre amigable de la IA que hizo cada resultado.
+function nombreDeIA(modelo?: string) {
+  if (!modelo) return "IA";
+  if (modelo === "video-gratis-navegador") return "Video con tus fotos";
+  return (
+    MODELOS_GRATIS.find((m) => m.modelo === modelo)?.nombre ||
+    MODELOS_AUTO.find((m) => m.endpoint === modelo)?.nombre ||
+    "IA"
+  );
+}
 
 // Qué se puede hacer: cada tarea define si es foto o video y qué variante.
 type Tarea = {
@@ -215,7 +228,10 @@ export default function EstudioIA({
     VIDEO: { clase: "panel", id: VIDEO_PANEL.id },
   }));
   const [progreso, setProgreso] = useState<number | null>(null);
-  const [videoListo, setVideoListo] = useState<(VideoArmado & { url: string }) | null>(null);
+  // Videos armados que todavía no se guardaron: se juntan para comparar.
+  const [borradores, setBorradores] = useState<(VideoArmado & { url: string; clave: number })[]>([]);
+  // Resultados elegidos para publicar juntos (se pueden mezclar de distintas IA).
+  const [elegidas, setElegidas] = useState<string[]>([]);
   const [verTodas, setVerTodas] = useState(false);
   const [extra, setExtra] = useState("");
   const [texto, setTexto] = useState("");
@@ -431,8 +447,6 @@ export default function EstudioIA({
   async function armarVideoGratis() {
     if (problema) return;
     setError("");
-    if (videoListo) URL.revokeObjectURL(videoListo.url);
-    setVideoListo(null);
     setProgreso(0);
     try {
       const v = await armarVideo({
@@ -442,15 +456,22 @@ export default function EstudioIA({
         textoPos,
         onProgreso: setProgreso,
       });
-      setVideoListo({ ...v, url: URL.createObjectURL(v.blob) });
+      setBorradores((prev) => [{ ...v, url: URL.createObjectURL(v.blob), clave: Date.now() }, ...prev]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo armar el video.");
     }
     setProgreso(null);
   }
 
-  async function guardarVideo() {
-    if (!videoListo) return;
+  function quitarBorrador(clave: number) {
+    setBorradores((prev) => {
+      const b = prev.find((x) => x.clave === clave);
+      if (b) URL.revokeObjectURL(b.url);
+      return prev.filter((x) => x.clave !== clave);
+    });
+  }
+
+  async function guardarVideo(videoListo: (typeof borradores)[number]) {
     setError("");
     setEnviando(true);
     try {
@@ -480,8 +501,7 @@ export default function EstudioIA({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accion: "registrar", productoId, mediaId: media.id }),
       });
-      URL.revokeObjectURL(videoListo.url);
-      setVideoListo(null);
+      quitarBorrador(videoListo.clave);
       await cargarTrabajos();
       await onNuevos();
     } catch (e) {
@@ -518,30 +538,35 @@ export default function EstudioIA({
     );
   }
 
+  function alternarElegida(id: string) {
+    setElegidas((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function actualizar() {
+    setOcupado("actualizar");
+    await cargarTrabajos();
+    await onNuevos();
+    setOcupado(null);
+  }
+
   async function descartar(m: NonNullable<Trabajo["media"]>) {
     if (!confirm("¿Descartar este resultado? Se borra del producto.")) return;
     setOcupado(m.id);
     await fetch(`/api/productos/${productoId}/media/${m.id}`, { method: "DELETE" });
+    setElegidas((prev) => prev.filter((x) => x !== m.id));
     await cargarTrabajos();
     onNuevos();
     setOcupado(null);
   }
 
-  // Resultados listos, con las fotos que salieron juntas (pack) agrupadas.
+  // Todas las versiones listas, de la más nueva a la más vieja. No se borra
+  // ninguna hasta que el usuario la descarte.
   const resultados = trabajos.filter((t) => t.estado === "LISTO" && t.media);
-  const grupos: NonNullable<Trabajo["media"]>[][] = [];
-  for (const t of resultados) {
-    const ultimo = grupos[grupos.length - 1];
-    const previo = ultimo && resultados.find((r) => r.media?.id === ultimo[0].id);
-    const juntos =
-      previo &&
-      t.tipo === "FOTO" &&
-      previo.tipo === "FOTO" &&
-      ultimo.length < 2 &&
-      Math.abs(new Date(previo.createdAt).getTime() - new Date(t.createdAt).getTime()) < 15000;
-    if (juntos) ultimo.push(t.media!);
-    else grupos.push([t.media!]);
-  }
+  const mediasElegidas = elegidas
+    .map((id) => resultados.find((t) => t.media?.id === id)?.media)
+    .filter((m): m is NonNullable<Trabajo["media"]> => Boolean(m));
+  const mezclaTipos = new Set(mediasElegidas.map((m) => m.tipo)).size > 1;
+  const variosVideos = mediasElegidas.filter((m) => m.tipo === "VIDEO").length > 1;
   const otrosTrabajos = trabajos.filter((t) => !(t.estado === "LISTO" && t.media));
 
   if (fotos.length === 0) {
@@ -861,9 +886,9 @@ export default function EstudioIA({
                 >
                   {enviando
                     ? "Generando..."
-                    : cantidadFotos === 2
-                    ? "Generar 2 fotos gratis"
-                    : "Generar foto gratis"}
+                    : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
+                        cantidadFotos === 2 ? "Generar 2 fotos gratis" : "Generar foto gratis"
+                      }`}
                 </button>
                 <span className="text-xs text-green-900">
                   Gratis · {modeloGratis.porDia} · tarda unos segundos
@@ -888,8 +913,8 @@ export default function EstudioIA({
                 >
                   {progreso !== null
                     ? `Armando video... ${progreso}%`
-                    : videoListo
-                    ? "Volver a armarlo"
+                    : borradores.length > 0
+                    ? "Armar otra versión"
                     : "Armar video gratis"}
                 </button>
                 <span className="text-xs text-green-900">
@@ -897,32 +922,40 @@ export default function EstudioIA({
                   Reels y TikTok · dejá esta pestaña abierta mientras se arma
                 </span>
               </div>
-              {videoListo && (
-                <div className="flex flex-col gap-2">
-                  <video
-                    src={videoListo.url}
-                    controls
-                    autoPlay
-                    muted
-                    playsInline
-                    className="w-full max-w-[240px] rounded-md bg-black"
-                  />
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={guardarVideo}
-                      disabled={enviando}
-                      className="rounded-md bg-navy text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
-                    >
-                      {enviando ? "Guardando..." : "Me gusta, guardarlo"}
-                    </button>
-                    {videoListo.extension === "webm" && (
-                      <span className="text-xs text-amber-700">
-                        Este navegador lo hizo en formato WebM: para Instagram armalo desde Chrome
-                        actualizado (sale en MP4).
-                      </span>
-                    )}
-                  </div>
+              {borradores.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {borradores.map((b, i) => (
+                    <div key={b.clave} className="flex flex-col gap-1.5">
+                      <video
+                        src={b.url}
+                        controls
+                        muted
+                        playsInline
+                        autoPlay={i === 0}
+                        className="w-full rounded-md bg-black"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => guardarVideo(b)}
+                        disabled={enviando}
+                        className="rounded-md bg-navy text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90 disabled:opacity-50"
+                      >
+                        {enviando ? "Guardando..." : "Me gusta, guardarlo"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => quitarBorrador(b.clave)}
+                        className="text-xs text-red-600 underline"
+                      >
+                        Quitar
+                      </button>
+                      {b.extension === "webm" && (
+                        <span className="text-[11px] text-amber-700">
+                          Salió en WebM: para Instagram armalo desde Chrome actualizado (MP4).
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -1009,11 +1042,9 @@ export default function EstudioIA({
               >
                 {enviando
                   ? "Enviando..."
-                  : modo === "FOTO"
-                  ? cantidadFotos === 2
-                    ? "Generar 2 fotos"
-                    : "Generar foto"
-                  : "Generar video"}
+                  : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
+                      modo === "FOTO" ? (cantidadFotos === 2 ? "Generar 2 fotos" : "Generar foto") : "Generar video"
+                    }`}
               </button>
               <span className="text-xs text-violet-900">
                 Costo: {costo}
@@ -1029,70 +1060,122 @@ export default function EstudioIA({
         </div>
       )}
 
-      {grupos.length > 0 && (
+      {resultados.length > 0 && (
         <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
-          <div>
-            <p className="text-sm font-semibold text-navy">Así quedó · resultados de la IA</p>
-            <p className="text-xs text-gray-500">
-              Mirá cómo quedó. Si te gusta, tocá <b>Publicar</b> y elegís en qué redes subirlo.
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-navy">
+                Así quedó · {resultados.length} versión{resultados.length === 1 ? "" : "es"}
+              </p>
+              <p className="text-xs text-gray-500">
+                Probá otras IA o estilos arriba: cada versión nueva se suma acá y no se borra nada
+                hasta que vos la descartes. Marcá las que te gusten (de cualquier IA) y publicalas
+                juntas.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={actualizar}
+              disabled={ocupado !== null}
+              className="rounded-md border border-gray-300 text-gray-700 text-xs font-semibold px-3 py-1.5 hover:border-navy disabled:opacity-50"
+            >
+              {ocupado === "actualizar" ? "Actualizando..." : "↻ Actualizar"}
+            </button>
           </div>
-          {grupos.map((g) => (
-            <div key={g[0].id} className="rounded-lg border border-gray-200 p-3 flex flex-col gap-3">
-              <div className={`grid gap-2 ${g.length > 1 ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"}`}>
-                {g.map((m) => (
-                  <a key={m.id} href={m.url} target="_blank" rel="noreferrer" className="block">
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {resultados.map((t) => {
+              const m = t.media!;
+              const pos = elegidas.indexOf(m.id);
+              return (
+                <div
+                  key={m.id}
+                  className={`rounded-lg border-2 p-1.5 flex flex-col gap-1.5 ${
+                    pos >= 0 ? "border-navy bg-navy/5" : "border-gray-200"
+                  }`}
+                >
+                  <button type="button" onClick={() => alternarElegida(m.id)} className="relative block">
                     {m.tipo === "FOTO" ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.url} alt="" className="w-full rounded-md object-contain bg-gray-50 max-h-96" />
+                      <img src={m.url} alt="" className="w-full aspect-[4/5] rounded-md object-cover bg-gray-50" />
                     ) : (
-                      <video src={m.url} controls playsInline className="w-full rounded-md bg-black max-h-96" />
+                      <video
+                        src={m.url}
+                        muted
+                        playsInline
+                        controls
+                        className="w-full aspect-[4/5] rounded-md bg-black object-cover"
+                      />
                     )}
-                  </a>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => usarResultados(g)}
-                  disabled={ocupado !== null}
-                  className="rounded-md bg-navy text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
-                >
-                  {ocupado === g[0].id
-                    ? "Preparando..."
-                    : g.length > 1
-                    ? "Publicar las 2 (carrusel)"
-                    : "Publicar"}
-                </button>
-                {g.length > 1 &&
-                  g.map((m, i) => (
+                    <span
+                      className={`absolute top-1.5 left-1.5 min-w-6 h-6 px-1 rounded-full text-[11px] font-bold flex items-center justify-center border-2 ${
+                        pos >= 0 ? "bg-navy text-white border-white" : "bg-white/90 text-gray-500 border-gray-300"
+                      }`}
+                    >
+                      {pos >= 0 ? pos + 1 : ""}
+                    </span>
+                  </button>
+                  <p className="text-[11px] text-gray-600 leading-tight">
+                    <b>{nombreDeIA(t.modelo)}</b> ·{" "}
+                    {new Date(t.createdAt).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}
+                    {m.aprobado && <span className="text-green-700"> · ✓ aprobada</span>}
+                  </p>
+                  <div className="flex items-center justify-between gap-1">
                     <button
-                      key={m.id}
                       type="button"
                       onClick={() => usarResultados([m])}
                       disabled={ocupado !== null}
-                      className="rounded-md border border-navy text-navy text-xs font-semibold px-3 py-1.5 hover:bg-navy/5 disabled:opacity-50"
+                      className="text-xs font-semibold text-navy underline disabled:opacity-50"
                     >
-                      Solo la {i + 1}
+                      {ocupado === m.id ? "Preparando..." : "Publicar sola"}
                     </button>
-                  ))}
-                {g.map((m, i) => (
-                  <button
-                    key={`d-${m.id}`}
-                    type="button"
-                    onClick={() => descartar(m)}
-                    disabled={ocupado !== null}
-                    className="text-xs text-red-600 underline disabled:opacity-50"
-                  >
-                    Descartar{g.length > 1 ? ` la ${i + 1}` : ""}
-                  </button>
-                ))}
-                {g.every((m) => m.aprobado) && (
-                  <span className="text-xs text-green-700">✓ Aprobada</span>
-                )}
+                    <button
+                      type="button"
+                      onClick={() => descartar(m)}
+                      disabled={ocupado !== null}
+                      className="text-xs text-red-600 underline disabled:opacity-50"
+                    >
+                      Descartar
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {elegidas.length > 0 && (
+            <div className="sticky bottom-2 rounded-lg bg-navy text-white p-3 flex flex-wrap items-center justify-between gap-2 shadow-lg">
+              <span className="text-sm">
+                {elegidas.length} elegida{elegidas.length === 1 ? "" : "s"}
+                {mezclaTipos && " · no se pueden mezclar fotos y videos"}
+                {variosVideos && " · elegí un solo video"}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setElegidas([])}
+                  className="text-xs underline text-white/80"
+                >
+                  Limpiar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => usarResultados(mediasElegidas)}
+                  disabled={ocupado !== null || mezclaTipos || variosVideos}
+                  className="rounded-md bg-gold text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                >
+                  {ocupado && ocupado !== "actualizar"
+                    ? "Preparando..."
+                    : elegidas.length > 1
+                    ? `Publicar las ${elegidas.length} juntas (carrusel)`
+                    : "Publicar"}
+                </button>
               </div>
             </div>
-          ))}
+          )}
+          <p className="text-[11px] text-gray-500">
+            En el paso de publicar también podés sumar al carrusel las fotos originales del producto.
+          </p>
         </div>
       )}
 
