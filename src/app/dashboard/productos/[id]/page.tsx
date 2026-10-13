@@ -4,6 +4,7 @@ import EditarProductoForm from "./editar-form";
 import SeccionMedios from "./seccion-medios";
 import { iaConfigurada } from "@/lib/ia";
 import { falConfigurado } from "@/lib/fal";
+import { cfConfigurado } from "@/lib/cloudflare-ia";
 
 export default async function EditarProductoPage({
   params,
@@ -58,6 +59,7 @@ export default async function EditarProductoPage({
           redes={redes}
           iaActiva={iaConfigurada()}
           falActivo={falConfigurado()}
+          cfActivo={cfConfigurado()}
           producto={producto.nombre}
         />
       </div>

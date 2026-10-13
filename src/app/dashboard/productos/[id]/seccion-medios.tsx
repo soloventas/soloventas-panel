@@ -14,6 +14,7 @@ export default function SeccionMedios({
   redes,
   iaActiva,
   falActivo,
+  cfActivo,
 }: {
   productoId: string;
   producto: string;
@@ -21,6 +22,7 @@ export default function SeccionMedios({
   redes: { instagram: string | null; facebook: string | null; tiktok: string | null };
   iaActiva: boolean;
   falActivo: boolean;
+  cfActivo: boolean;
 }) {
   const [base, setBase] = useState<Media[]>(inicial);
   const [version, setVersion] = useState(0);
@@ -53,6 +55,7 @@ export default function SeccionMedios({
         producto={producto}
         fotos={fotosBase}
         falActivo={falActivo}
+        cfActivo={cfActivo}
         onNuevos={recargar}
         onPublicar={(ids, tipo) => setPreseleccion({ ids, tipo, clave: Date.now() })}
       />

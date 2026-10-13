@@ -18,8 +18,10 @@ import {
   type VideoTipoId,
 } from "@/lib/estudio";
 import VistaPreviaIA from "./vista-previa-ia";
+import { upload } from "@vercel/blob/client";
+import { MODELOS_GRATIS } from "@/lib/cloudflare-ia";
+import { achicarFoto, armarVideo, type VideoArmado } from "@/lib/video-navegador";
 import {
-  MODELO_AUTO_DEFECTO,
   buscarModelo,
   costoTexto,
   herramientasPara,
@@ -81,8 +83,16 @@ const TAREAS: Tarea[] = [
   })),
 ];
 
-// La IA elegida: una web gratis o un modelo pago automático.
-type EleccionIA = { clase: "gratis" | "paga"; id: string };
+// La IA elegida: gratis dentro del panel, una web gratis o un modelo pago.
+type EleccionIA = { clase: "panel" | "gratis" | "paga"; id: string };
+
+// Video gratis hecho en el navegador con las fotos reales del producto.
+const VIDEO_PANEL = {
+  id: "video-fotos",
+  nombre: "Video con tus fotos",
+  empresa: "Hecho en tu panel",
+  detalle: "Gratis y sin límite. Movimiento suave, transiciones y tu texto, con las fotos reales.",
+};
 
 function Chip({
   activo,
@@ -177,6 +187,7 @@ export default function EstudioIA({
   producto,
   fotos,
   falActivo,
+  cfActivo = false,
   onNuevos,
   onPublicar,
 }: {
@@ -184,6 +195,7 @@ export default function EstudioIA({
   producto: string;
   fotos: Media[];
   falActivo: boolean;
+  cfActivo?: boolean;
   onNuevos: () => void | Promise<void>;
   // Lleva lo elegido al publicador (ya aprobado) para elegir redes y publicar.
   onPublicar?: (ids: string[], tipo: Modo) => void;
@@ -195,18 +207,15 @@ export default function EstudioIA({
   const [persona, setPersona] = useState<PersonaId>("mujer");
   const [formato, setFormato] = useState<FormatoId>("4:5");
   const [duracion, setDuracion] = useState<5 | 10>(5);
-  // Por defecto, la recomendada: paga si está la clave de fal.ai, si no la gratis.
-  const [ia, setIa] = useState<Record<Modo, EleccionIA>>(() =>
-    falActivo
-      ? {
-          FOTO: { clase: "paga", id: MODELO_AUTO_DEFECTO.FOTO },
-          VIDEO: { clase: "paga", id: MODELO_AUTO_DEFECTO.VIDEO },
-        }
-      : {
-          FOTO: { clase: "gratis", id: herramientasPara("FOTO")[0].id },
-          VIDEO: { clase: "gratis", id: herramientasPara("VIDEO")[0].id },
-        }
-  );
+  // Por defecto, siempre una gratis: primero la que funciona dentro del panel.
+  const [ia, setIa] = useState<Record<Modo, EleccionIA>>(() => ({
+    FOTO: cfActivo
+      ? { clase: "panel", id: MODELOS_GRATIS[0].id }
+      : { clase: "gratis", id: herramientasPara("FOTO")[0].id },
+    VIDEO: { clase: "panel", id: VIDEO_PANEL.id },
+  }));
+  const [progreso, setProgreso] = useState<number | null>(null);
+  const [videoListo, setVideoListo] = useState<(VideoArmado & { url: string }) | null>(null);
   const [verTodas, setVerTodas] = useState(false);
   const [extra, setExtra] = useState("");
   const [texto, setTexto] = useState("");
@@ -225,7 +234,7 @@ export default function EstudioIA({
   const herramientaFoto = FOTO_TIPOS.find((f) => f.id === fotoTipo)!;
   const usaEscena = modo === "VIDEO" || herramientaFoto.usaEscena;
   const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona";
-  const maxSeleccion = modo === "FOTO" ? 4 : 2;
+  const maxSeleccion = 4;
 
   // Por defecto usamos la primera foto como base.
   useEffect(() => {
@@ -276,8 +285,14 @@ export default function EstudioIA({
     ? herramientas
     : herramientas.filter((h, i) => i < VISIBLES || (eleccion.clase === "gratis" && h.id === herramienta.id));
   const modelo = buscarModelo(modo, eleccion.clase === "paga" ? eleccion.id : undefined);
+  const modeloGratis = MODELOS_GRATIS.find((m) => m.id === eleccion.id) || MODELOS_GRATIS[0];
+  const nombrePanel = modo === "VIDEO" ? VIDEO_PANEL.nombre : modeloGratis.nombre;
   const cantidadFotos = modo === "FOTO" ? prompts.length : 0;
   const costo = costoTexto(modelo, modo, duracion, cantidadFotos);
+
+  const seleccionadas = seleccion
+    .map((id) => fotos.find((f) => f.id === id))
+    .filter((f): f is Media => Boolean(f));
 
   function elegirIA(e: EleccionIA) {
     setIa((prev) => ({ ...prev, [modo]: e }));
@@ -376,6 +391,105 @@ export default function EstudioIA({
     await cargarTrabajos();
   }
 
+  // Fotos con la IA gratis del panel (FLUX.2 Klein en Cloudflare).
+  async function generarGratis() {
+    if (problema) return;
+    setError("");
+    setEnviando(true);
+    try {
+      const form = new FormData();
+      form.append(
+        "datos",
+        JSON.stringify({
+          productoId,
+          modeloId: modeloGratis.id,
+          fotoTipo,
+          escena,
+          escenaPersonalizada,
+          persona,
+          formato,
+          extra,
+          texto,
+          textoPos,
+        })
+      );
+      const refs = await Promise.all(seleccionadas.map((f) => achicarFoto(f.url)));
+      refs.forEach((b, i) => form.append(`ref_${i}`, b, `ref${i}.jpg`));
+      const r = await fetch("/api/ia/gratis", { method: "POST", body: form });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "La IA gratis no pudo generar la foto.");
+      if (data.aviso) setError(data.aviso);
+      await cargarTrabajos();
+      await onNuevos();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "La IA gratis no pudo generar la foto.");
+    }
+    setEnviando(false);
+  }
+
+  // Video gratis: se arma en el navegador y se muestra antes de guardarlo.
+  async function armarVideoGratis() {
+    if (problema) return;
+    setError("");
+    if (videoListo) URL.revokeObjectURL(videoListo.url);
+    setVideoListo(null);
+    setProgreso(0);
+    try {
+      const v = await armarVideo({
+        urls: seleccionadas.map((f) => f.url),
+        segundos: Math.max(duracion, seleccionadas.length * 3),
+        texto,
+        textoPos,
+        onProgreso: setProgreso,
+      });
+      setVideoListo({ ...v, url: URL.createObjectURL(v.blob) });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo armar el video.");
+    }
+    setProgreso(null);
+  }
+
+  async function guardarVideo() {
+    if (!videoListo) return;
+    setError("");
+    setEnviando(true);
+    try {
+      const nombre = `video-${Date.now()}.${videoListo.extension}`;
+      const blob = await upload(`productos/${productoId}/videos/${nombre}`, videoListo.blob, {
+        access: "public",
+        handleUploadUrl: "/api/media/upload",
+        clientPayload: JSON.stringify({ productoId, tipo: "VIDEO" }),
+        contentType: videoListo.tipo,
+      });
+      const r = await fetch(`/api/productos/${productoId}/media`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: blob.url,
+          pathname: blob.pathname,
+          tipo: "VIDEO",
+          nombre,
+          tamano: videoListo.blob.size,
+          origen: "ORIGINAL",
+        }),
+      });
+      const media = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(media.error || "No se pudo guardar el video.");
+      await fetch("/api/ia/gratis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion: "registrar", productoId, mediaId: media.id }),
+      });
+      URL.revokeObjectURL(videoListo.url);
+      setVideoListo(null);
+      await cargarTrabajos();
+      await onNuevos();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el video.");
+    }
+    setEnviando(false);
+  }
+
   const [ocupado, setOcupado] = useState<string | null>(null);
 
   // Aprueba lo que hizo la IA y lo lleva a "Publicar en redes".
@@ -429,10 +543,6 @@ export default function EstudioIA({
     else grupos.push([t.media!]);
   }
   const otrosTrabajos = trabajos.filter((t) => !(t.estado === "LISTO" && t.media));
-
-  const seleccionadas = seleccion
-    .map((id) => fotos.find((f) => f.id === id))
-    .filter((f): f is Media => Boolean(f));
 
   if (fotos.length === 0) {
     return (
@@ -512,7 +622,9 @@ export default function EstudioIA({
           })}
         </div>
         {modo === "VIDEO" && (
-          <p className="text-xs text-gray-500">La foto 1 es el inicio del video y la 2, el final.</p>
+          <p className="text-xs text-gray-500">
+            La foto 1 es el inicio del video. Con las IA de video se usan la primera y la última.
+          </p>
         )}
       </Paso>
 
@@ -619,7 +731,44 @@ export default function EstudioIA({
       <Paso numero={4} titulo="¿Con qué IA?">
         <div>
           <p className="text-xs font-medium text-gray-700 mb-1.5">
-            Gratis · la usás en su web, el panel te arma la instrucción
+            ⭐ Gratis dentro de tu panel · sin salir de la página
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {modo === "VIDEO" ? (
+              <TarjetaIA
+                activa={eleccion.clase === "panel"}
+                onClick={() => elegirIA({ clase: "panel", id: VIDEO_PANEL.id })}
+                nombre={VIDEO_PANEL.nombre}
+                empresa={VIDEO_PANEL.empresa}
+                detalle={VIDEO_PANEL.detalle}
+                etiqueta="Gratis"
+                recomendada
+              />
+            ) : (
+              MODELOS_GRATIS.map((m) => (
+                <TarjetaIA
+                  key={m.id}
+                  activa={eleccion.clase === "panel" && modeloGratis.id === m.id}
+                  onClick={() => elegirIA({ clase: "panel", id: m.id })}
+                  nombre={m.nombre}
+                  empresa={m.empresa}
+                  detalle={`${m.nota} ${m.porDia}.`}
+                  etiqueta="Gratis"
+                  recomendada={m.recomendado}
+                  apagada={!cfActivo}
+                />
+              ))
+            )}
+          </div>
+          {modo === "FOTO" && !cfActivo && (
+            <p className="text-[11px] text-amber-700 mt-1.5">
+              Para usarlas falta conectar la cuenta gratis de Cloudflare (se hace una sola vez).
+            </p>
+          )}
+        </div>
+        <div>
+          <p className="text-xs font-medium text-gray-700 mb-1.5">
+            Gratis en su web · el panel te arma la instrucción y la abrís
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {herramientasVisibles.map((h) => (
@@ -631,7 +780,7 @@ export default function EstudioIA({
                 empresa={h.empresa}
                 detalle={h.plan}
                 etiqueta="Gratis"
-                recomendada={h.recomendado?.includes(modo)}
+                recomendada={false}
               />
             ))}
           </div>
@@ -665,7 +814,7 @@ export default function EstudioIA({
                 empresa={m.empresa}
                 detalle={m.nota}
                 etiqueta={costoTexto(m, modo, duracion, cantidadFotos)}
-                recomendada={m.recomendado}
+                recomendada={false}
                 apagada={!falActivo}
               />
             ))}
@@ -685,15 +834,101 @@ export default function EstudioIA({
         duracion={duracion}
         texto={texto.trim()}
         textoPos={textoPos}
-        nombreIA={eleccion.clase === "gratis" ? herramienta.nombre : modelo.nombre}
-        etiquetaIA={eleccion.clase === "gratis" ? "Gratis" : costo}
-        gratis={eleccion.clase === "gratis"}
+        nombreIA={
+          eleccion.clase === "panel" ? nombrePanel : eleccion.clase === "gratis" ? herramienta.nombre : modelo.nombre
+        }
+        etiquetaIA={eleccion.clase === "paga" ? costo : eleccion.clase === "panel" ? "Gratis en tu panel" : "Gratis"}
+        gratis={eleccion.clase !== "paga"}
+        videoConFotos={modo === "VIDEO" && eleccion.clase === "panel"}
       />
 
       {problema && <p className="text-sm text-amber-700">{problema}</p>}
 
       {/* 5. Hacerlo */}
-      {eleccion.clase === "gratis" ? (
+      {eleccion.clase === "panel" ? (
+        <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
+          <p className="text-sm font-semibold text-green-900">
+            Hacelo gratis acá mismo con {nombrePanel}
+          </p>
+          {modo === "FOTO" ? (
+            cfActivo ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={generarGratis}
+                  disabled={Boolean(problema) || enviando}
+                  className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                >
+                  {enviando
+                    ? "Generando..."
+                    : cantidadFotos === 2
+                    ? "Generar 2 fotos gratis"
+                    : "Generar foto gratis"}
+                </button>
+                <span className="text-xs text-green-900">
+                  Gratis · {modeloGratis.porDia} · tarda unos segundos
+                </span>
+              </div>
+            ) : (
+              <p className="text-sm text-green-900">
+                Falta conectar la cuenta gratis de Cloudflare: cargá{" "}
+                <code className="bg-white/70 px-1 rounded">CF_ACCOUNT_ID</code> y{" "}
+                <code className="bg-white/70 px-1 rounded">CF_API_TOKEN</code> en Vercel. Mientras
+                tanto elegí una IA gratis de las de abajo.
+              </p>
+            )
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={armarVideoGratis}
+                  disabled={Boolean(problema) || progreso !== null || enviando}
+                  className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                >
+                  {progreso !== null
+                    ? `Armando video... ${progreso}%`
+                    : videoListo
+                    ? "Volver a armarlo"
+                    : "Armar video gratis"}
+                </button>
+                <span className="text-xs text-green-900">
+                  Gratis · {Math.max(duracion, seleccionadas.length * 3)} segundos, vertical para
+                  Reels y TikTok · dejá esta pestaña abierta mientras se arma
+                </span>
+              </div>
+              {videoListo && (
+                <div className="flex flex-col gap-2">
+                  <video
+                    src={videoListo.url}
+                    controls
+                    autoPlay
+                    muted
+                    playsInline
+                    className="w-full max-w-[240px] rounded-md bg-black"
+                  />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={guardarVideo}
+                      disabled={enviando}
+                      className="rounded-md bg-navy text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                    >
+                      {enviando ? "Guardando..." : "Me gusta, guardarlo"}
+                    </button>
+                    {videoListo.extension === "webm" && (
+                      <span className="text-xs text-amber-700">
+                        Este navegador lo hizo en formato WebM: para Instagram armalo desde Chrome
+                        actualizado (sale en MP4).
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : eleccion.clase === "gratis" ? (
         <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-green-900">

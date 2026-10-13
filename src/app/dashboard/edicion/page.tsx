@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { iaConfigurada } from "@/lib/ia";
 import { falConfigurado } from "@/lib/fal";
+import { cfConfigurado } from "@/lib/cloudflare-ia";
 import SeccionMedios from "../productos/[id]/seccion-medios";
 
 // Edición de foto y video: elegís un producto del catálogo y desde acá
@@ -80,6 +81,7 @@ export default async function EdicionPage({
           redes={redes}
           iaActiva={iaConfigurada()}
           falActivo={falConfigurado()}
+          cfActivo={cfConfigurado()}
         />
       </div>
     );

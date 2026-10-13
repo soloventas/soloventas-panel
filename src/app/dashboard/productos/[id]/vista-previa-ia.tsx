@@ -74,7 +74,7 @@ function Marco({
                 src={cuadro.final.url}
                 alt=""
                 title="Final del video"
-                className="absolute bottom-2 right-2 w-10 h-10 object-cover rounded border-2 border-white"
+                className="absolute top-2 right-2 w-10 h-10 object-cover rounded border-2 border-white"
               />
             )}
           </>
@@ -110,6 +110,7 @@ export default function VistaPreviaIA({
   nombreIA,
   etiquetaIA,
   gratis,
+  videoConFotos = false,
 }: {
   modo: "FOTO" | "VIDEO";
   fotoTipo: FotoTipoId;
@@ -124,6 +125,8 @@ export default function VistaPreviaIA({
   nombreIA: string;
   etiquetaIA: string;
   gratis: boolean;
+  // Video armado en el panel con las fotos reales (sin IA).
+  videoConFotos?: boolean;
 }) {
   const base = fotos[0];
   const proporcion = PROPORCION[formato];
@@ -154,6 +157,15 @@ export default function VistaPreviaIA({
         filtro: "brightness(1.08) contrast(1.12) saturate(1.2)",
       });
     }
+  } else if (videoConFotos) {
+    cuadros.push({
+      titulo: `Video ${Math.max(duracion, fotos.length * 3)} s · ${fotos.length} foto${fotos.length === 1 ? "" : "s"} con movimiento`,
+      foto: base,
+      fondo: "linear-gradient(180deg,#9ca3af 0%,#4b5563 100%)",
+      proporcion: "9 / 16",
+      video: true,
+      final: fotos.length > 1 ? fotos[fotos.length - 1] : undefined,
+    });
   } else {
     cuadros.push({
       titulo:
@@ -193,9 +205,15 @@ export default function VistaPreviaIA({
         ))}
       </div>
       <p className="text-[11px] text-gray-500">
-        Es un boceto para que veas cómo se arma (formato, ambiente y texto). La imagen final la crea{" "}
-        {nombreIA} y el producto queda igual al de tu foto.
-        {texto && modo === "VIDEO" &&
+        {videoConFotos ? (
+          "Es un boceto: el video usa tus fotos tal cual, con un acercamiento suave y un fundido entre una y otra. Lo ves completo antes de guardarlo."
+        ) : (
+          <>
+            Es un boceto para que veas cómo se arma (formato, ambiente y texto). La imagen final la
+            crea {nombreIA} y el producto queda igual al de tu foto.
+          </>
+        )}
+        {texto && modo === "VIDEO" && !videoConFotos &&
           " Los videos con IA a veces escriben mal las letras: si pasa, poné el texto en la descripción del posteo."}
       </p>
     </div>
