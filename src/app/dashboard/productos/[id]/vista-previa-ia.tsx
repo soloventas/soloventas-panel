@@ -34,6 +34,8 @@ type Cuadro = {
   final?: Media;
   // Publicidad en dos mitades: producto a la izquierda, modelo a la derecha.
   dividida?: boolean;
+  // Ficha publicitaria: título, beneficios, colores y el envase detallado.
+  ficha?: boolean;
 };
 
 function Marco({
@@ -64,7 +66,31 @@ function Marco({
             </div>
           </div>
         )}
-        {cuadro.foto && !cuadro.dividida && (
+        {cuadro.ficha && cuadro.foto && (
+          <div className="absolute inset-0 grid grid-cols-[1fr_1fr] gap-1 p-2 bg-[#f6f2f4]">
+            <div className="flex flex-col gap-1 pt-1">
+              <span className="h-2 w-4/5 rounded bg-violet-800" />
+              <span className="h-2 w-3/5 rounded bg-pink-500" />
+              <span className="h-1.5 w-full rounded bg-violet-700/80 mt-0.5" />
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="flex items-center gap-1 mt-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-violet-700 shrink-0" />
+                  <span className="h-1.5 flex-1 rounded bg-gray-400/70" />
+                </span>
+              ))}
+              <span className="mt-auto flex gap-1">
+                <span className="h-6 flex-1 rounded-full bg-gray-800" />
+                <span className="h-6 flex-1 rounded-full bg-white border border-gray-300" />
+              </span>
+            </div>
+            <div className="relative rounded bg-white/70 flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={cuadro.foto.url} alt="" className="max-w-[92%] max-h-[85%] object-contain drop-shadow-md" />
+            </div>
+            <span className="col-span-2 h-3 rounded bg-violet-800" />
+          </div>
+        )}
+        {cuadro.foto && !cuadro.dividida && !cuadro.ficha && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={cuadro.foto.url}
@@ -73,7 +99,7 @@ function Marco({
             style={cuadro.filtro ? { filter: cuadro.filtro } : undefined}
           />
         )}
-        {cuadro.persona && cuadro.persona !== "ninguna" && !cuadro.dividida && (
+        {cuadro.persona && cuadro.persona !== "ninguna" && !cuadro.dividida && !cuadro.ficha && (
           <span className="absolute bottom-2 left-2 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-gray-800">
             {cuadro.persona === "hombre" ? "🧔 Modelo IA usándolo" : "👩 Modelo IA usándolo"}
           </span>
@@ -166,12 +192,13 @@ export default function VistaPreviaIA({
       cuadros.push({ titulo: "Producto real", foto: base, fondo: FONDOS.estudio, proporcion });
       lista.forEach((e) =>
         cuadros.push({
-          titulo: `Con modelo · ${e.nombre}`,
+          titulo: e.id === "ficha" ? e.nombre : `Con modelo · ${e.nombre}`,
           foto: base,
           fondo: fondoEstilo(e.id),
           proporcion,
           persona: persona === "ninguna" ? "mujer" : persona,
           dividida: e.id === "dividida",
+          ficha: e.id === "ficha",
         })
       );
     } else if (fotoTipo === "escena") {
@@ -182,6 +209,7 @@ export default function VistaPreviaIA({
           fondo: fondoEstilo(e.id),
           proporcion,
           dividida: e.id === "dividida",
+          ficha: e.id === "ficha",
           persona: e.id === "dividida" ? (persona === "ninguna" ? "mujer" : persona) : undefined,
         })
       );
