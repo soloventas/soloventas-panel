@@ -17,6 +17,21 @@ export type FormatoId = "1:1" | "4:5" | "9:16";
 export type VideoTipoId = "giro" | "persona" | "colores";
 export type CalidadId = "estandar" | "premium";
 export type FotoTipoId = "pack" | "escena" | "catalogo" | "mejorar";
+export type TextoPosId = "arriba" | "abajo";
+
+// Texto que el usuario quiere escrito sobre la foto o el video (ej. "OFERTA").
+export type TextoImagen = { texto?: string; textoPos?: TextoPosId };
+
+export function limpiarTexto(t?: string) {
+  return (t || "").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+function instruccionTexto(t: TextoImagen, video = false) {
+  const texto = limpiarTexto(t.texto);
+  if (!texto) return "";
+  const donde = t.textoPos === "abajo" ? "bottom" : "top";
+  return `Add this exact text, spelled exactly as written (it is in Spanish, keep accents and capitalization): "${texto}". Place it at the ${donde} of the ${video ? "frame, visible during the whole video" : "image"}, in a bold, clean, modern sans-serif font, large and easy to read on a phone, with strong contrast against the background, never covering the product. Do not add any other text.`;
+}
 
 // Herramientas de edición de foto. "pack" es la principal: siempre sale el
 // producto real + una persona usándolo, para publicarlas juntas.
@@ -144,8 +159,9 @@ export function promptFoto(opciones: {
   persona: PersonaId;
   formato: FormatoId;
   extra?: string;
-}) {
+} & TextoImagen) {
   const escena = escenaEn(opciones.escena, opciones.escenaPersonalizada || "");
+  const textoPedido = instruccionTexto(opciones);
   const formato =
     opciones.formato === "9:16"
       ? "a vertical 9:16 story format"
@@ -160,7 +176,10 @@ export function promptFoto(opciones: {
     persona(opciones.persona, escena),
     "Style: modern, aspirational, high-end lifestyle photography, realistic lighting and shadows, sharp focus on the product, shallow depth of field, vibrant but natural colors.",
     `Compose it for ${formato}, keeping the product clearly visible and prominent.`,
-    "Output one single photo only. No added text, captions, prices, arrows, page numbers, carousel or app interface elements, watermarks or extra logos.",
+    textoPedido
+      ? "Output one single photo only. No prices, arrows, page numbers, carousel or app interface elements, watermarks or extra logos."
+      : "Output one single photo only. No added text, captions, prices, arrows, page numbers, carousel or app interface elements, watermarks or extra logos.",
+    textoPedido,
     opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
   ]
     .filter(Boolean)
@@ -176,7 +195,7 @@ export function promptsPackFoto(opciones: {
   persona: PersonaId;
   formato: FormatoId;
   extra?: string;
-}) {
+} & TextoImagen) {
   const persona: PersonaId = opciones.persona === "ninguna" ? "mujer" : opciones.persona;
   return [
     {
@@ -203,9 +222,13 @@ export function promptsFotos(
     persona: PersonaId;
     formato: FormatoId;
     extra?: string;
-  }
+  } & TextoImagen
 ): { titulo: string; prompt: string }[] {
   const extra = opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "";
+  const textoPedido = instruccionTexto(opciones);
+  const sinExtras = textoPedido
+    ? "Output one single photo only. No prices, arrows, watermarks or extra logos."
+    : SIN_EXTRAS;
   if (tipo === "pack") return promptsPackFoto(opciones);
   if (tipo === "escena") {
     return [{ titulo: "Producto en el lugar", prompt: promptFoto({ ...opciones, persona: "ninguna" }) }];
@@ -220,7 +243,8 @@ export function promptsFotos(
           `Product: ${opciones.producto}.`,
           "Remove the original background completely and place the product centered on a pure white (#FFFFFF) seamless background, with a soft natural shadow under it. Even, bright studio lighting, sharp focus, true-to-life colors.",
           "Square 1:1 composition with some margin around the product.",
-          SIN_EXTRAS,
+          sinExtras,
+          textoPedido,
           extra,
         ]
           .filter(Boolean)
@@ -236,7 +260,8 @@ export function promptsFotos(
         FIDELIDAD,
         `Product: ${opciones.producto}.`,
         "Improve lighting and exposure, increase sharpness and detail, correct white balance, make colors vibrant but true to life, remove dust, noise and small imperfections.",
-        SIN_EXTRAS,
+        sinExtras,
+        textoPedido,
         extra,
       ]
         .filter(Boolean)
@@ -252,8 +277,9 @@ export function promptVideo(opciones: {
   escenaPersonalizada?: string;
   persona: PersonaId;
   extra?: string;
-}) {
+} & TextoImagen) {
   const escena = escenaEn(opciones.escena, opciones.escenaPersonalizada || "");
+  const textoPedido = instruccionTexto(opciones, true);
   let base = "";
   if (opciones.tipo === "giro") {
     base = `Smooth 360-degree turntable rotation of the product, which stays centered in frame. Setting: ${escena}. Slow, elegant camera, soft premium lighting, commercial product video.`;
@@ -267,7 +293,8 @@ export function promptVideo(opciones: {
     base,
     `Product: ${opciones.producto}.`,
     "The product must remain exactly identical to the reference image: same shape, colors, logos and details throughout the whole video.",
-    "No added text, no watermarks.",
+    textoPedido ? "No watermarks." : "No added text, no watermarks.",
+    textoPedido,
     opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
   ]
     .filter(Boolean)

@@ -230,6 +230,7 @@ export type DatosPedido = {
   urls: string[]; // fotos de base, en orden
   formato: FormatoId;
   duracion: 5 | 10;
+  conTexto?: boolean; // el usuario pidió un texto escrito sobre la imagen
 };
 
 export type ModeloAuto = {
@@ -249,6 +250,7 @@ export type ModeloAuto = {
 
 const NEGATIVO =
   "blur, distortion, deformed product, changed logo, extra text, watermark, low quality";
+const NEGATIVO_CON_TEXTO = "blur, distortion, deformed product, changed logo, watermark, low quality";
 
 const fotoNanoBanana = (d: DatosPedido) => ({
   prompt: d.prompt,
@@ -264,7 +266,7 @@ const videoKling = (d: DatosPedido) => {
     start_image_url: d.urls[0],
     duration: d.duracion,
     generate_audio: false,
-    negative_prompt: NEGATIVO,
+    negative_prompt: d.conTexto ? NEGATIVO_CON_TEXTO : NEGATIVO,
   };
   if (d.urls.length > 1) input.end_image_url = d.urls[d.urls.length - 1];
   return input;

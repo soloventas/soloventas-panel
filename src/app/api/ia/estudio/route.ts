@@ -7,6 +7,8 @@ import { enviarAFal, estadoFal, falConfigurado, resultadoFal } from "@/lib/fal";
 import {
   promptVideo,
   promptsFotos,
+  limpiarTexto,
+  type TextoPosId,
   type CalidadId,
   type FotoTipoId,
   type EscenaId,
@@ -138,6 +140,8 @@ export async function POST(req: NextRequest) {
     videoTipo?: VideoTipoId;
     duracion?: number;
     extra?: string;
+    texto?: string;
+    textoPos?: TextoPosId;
   };
 
   const { productoId, tipo } = body;
@@ -194,6 +198,9 @@ export async function POST(req: NextRequest) {
   const pedidos: { prompt: string; input: Record<string, unknown> }[] = [];
   const formato = body.formato || "4:5";
   const duracion = body.duracion === 10 ? 10 : 5;
+  const texto = limpiarTexto(body.texto);
+  const textoPos: TextoPosId = body.textoPos === "abajo" ? "abajo" : "arriba";
+  const conTexto = Boolean(texto);
 
   if (tipo === "FOTO") {
     const pack = promptsFotos(fotoTipo, {
@@ -203,11 +210,13 @@ export async function POST(req: NextRequest) {
       persona,
       formato,
       extra: body.extra,
+      texto,
+      textoPos,
     });
     for (const p of pack) {
       pedidos.push({
         prompt: p.prompt,
-        input: modelo.armar({ prompt: p.prompt, urls, formato, duracion }),
+        input: modelo.armar({ prompt: p.prompt, urls, formato, duracion, conTexto }),
       });
     }
   } else {
@@ -225,8 +234,10 @@ export async function POST(req: NextRequest) {
       escenaPersonalizada: body.escenaPersonalizada,
       persona,
       extra: body.extra,
+      texto,
+      textoPos,
     });
-    pedidos.push({ prompt, input: modelo.armar({ prompt, urls, formato, duracion }) });
+    pedidos.push({ prompt, input: modelo.armar({ prompt, urls, formato, duracion, conTexto }) });
   }
 
   try {

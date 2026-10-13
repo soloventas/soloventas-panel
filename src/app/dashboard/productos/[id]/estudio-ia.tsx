@@ -14,8 +14,10 @@ import {
   type FotoTipoId,
   type FormatoId,
   type PersonaId,
+  type TextoPosId,
   type VideoTipoId,
 } from "@/lib/estudio";
+import VistaPreviaIA from "./vista-previa-ia";
 import {
   MODELO_AUTO_DEFECTO,
   buscarModelo,
@@ -207,6 +209,8 @@ export default function EstudioIA({
   );
   const [verTodas, setVerTodas] = useState(false);
   const [extra, setExtra] = useState("");
+  const [texto, setTexto] = useState("");
+  const [textoPos, setTextoPos] = useState<TextoPosId>("arriba");
   const [copiado, setCopiado] = useState<number | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState("");
@@ -234,15 +238,33 @@ export default function EstudioIA({
 
   const prompts = useMemo(() => {
     if (modo === "FOTO") {
-      return promptsFotos(fotoTipo, { producto, escena, escenaPersonalizada, persona, formato, extra });
+      return promptsFotos(fotoTipo, {
+        producto,
+        escena,
+        escenaPersonalizada,
+        persona,
+        formato,
+        extra,
+        texto,
+        textoPos,
+      });
     }
     return [
       {
         titulo: "Video",
-        prompt: promptVideo({ producto, tipo: videoTipo, escena, escenaPersonalizada, persona, extra }),
+        prompt: promptVideo({
+          producto,
+          tipo: videoTipo,
+          escena,
+          escenaPersonalizada,
+          persona,
+          extra,
+          texto,
+          textoPos,
+        }),
       },
     ];
-  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra]);
+  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra, texto, textoPos]);
 
   const herramientas = herramientasPara(modo);
   const modelos = modelosPara(modo);
@@ -341,6 +363,8 @@ export default function EstudioIA({
         videoTipo,
         duracion,
         extra,
+        texto,
+        textoPos,
       }),
     });
     const data = await r.json().catch(() => ({}));
@@ -550,6 +574,39 @@ export default function EstudioIA({
           </div>
         </div>
 
+        <div>
+          <p className="text-xs font-medium text-gray-700 mb-1.5">
+            Texto escrito {modo === "FOTO" ? "sobre la foto" : "en el video"} (opcional)
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              value={texto}
+              onChange={(e) => setTexto(e.target.value.slice(0, 80))}
+              placeholder="Ej.: NUEVO INGRESO · Consultá precio"
+              className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+            />
+            <div className="flex gap-2">
+              <Chip activo={textoPos === "arriba"} onClick={() => setTextoPos("arriba")}>
+                Arriba
+              </Chip>
+              <Chip activo={textoPos === "abajo"} onClick={() => setTextoPos("abajo")}>
+                Abajo
+              </Chip>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-1.5">
+            {[producto, "Nuevo ingreso", "Consultá precio", "www.soloventas.com.ar"].map((t) => (
+              <Chip key={t} activo={texto === t} onClick={() => setTexto(texto === t ? "" : t)}>
+                {t}
+              </Chip>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            La IA lo escribe tal cual, en letra grande y sin tapar el producto. Dejalo vacío si no
+            querés texto.
+          </p>
+        </div>
+
         <input
           value={extra}
           onChange={(e) => setExtra(e.target.value)}
@@ -615,6 +672,23 @@ export default function EstudioIA({
           </div>
         </div>
       </Paso>
+
+      {/* Vista previa de lo que va a hacer la IA elegida */}
+      <VistaPreviaIA
+        modo={modo}
+        fotoTipo={fotoTipo}
+        videoTipo={videoTipo}
+        fotos={seleccionadas}
+        escena={escena}
+        persona={persona}
+        formato={formato}
+        duracion={duracion}
+        texto={texto.trim()}
+        textoPos={textoPos}
+        nombreIA={eleccion.clase === "gratis" ? herramienta.nombre : modelo.nombre}
+        etiquetaIA={eleccion.clase === "gratis" ? "Gratis" : costo}
+        gratis={eleccion.clase === "gratis"}
+      />
 
       {problema && <p className="text-sm text-amber-700">{problema}</p>}
 
