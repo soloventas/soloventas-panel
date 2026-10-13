@@ -81,18 +81,7 @@ export const VIDEO_TIPOS: { id: VideoTipoId; nombre: string; ayuda: string }[] =
   },
 ];
 
-// Costos aproximados en US$ (fal.ai), solo para mostrar al usuario.
-export const COSTO_FOTO: Record<CalidadId, number> = { estandar: 0.04, premium: 0.15 };
-export const COSTO_VIDEO_SEG: Record<CalidadId, number> = { estandar: 0.084, premium: 0.112 };
-
-export const MODELO_FOTO: Record<CalidadId, string> = {
-  estandar: "fal-ai/nano-banana/edit",
-  premium: "fal-ai/nano-banana-pro/edit",
-};
-export const MODELO_VIDEO: Record<CalidadId, string> = {
-  estandar: "fal-ai/kling-video/v3/standard/image-to-video",
-  premium: "fal-ai/kling-video/v3/pro/image-to-video",
-};
+// Los modelos y costos del modo automático están en proveedores-ia.ts.
 
 const FIDELIDAD =
   "Use the product exactly as shown in the reference image(s): keep its shape, proportions, colors, materials, textures, logos, printed text and every detail identical. Do not redesign, recolor, resize, add or remove anything on the product.";

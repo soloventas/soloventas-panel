@@ -3,20 +3,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "./media-manager";
 import {
-  COSTO_FOTO,
-  COSTO_VIDEO_SEG,
   ESCENAS,
   FORMATOS,
   PERSONAS,
   VIDEO_TIPOS,
   promptVideo,
   promptsPackFoto,
-  type CalidadId,
   type EscenaId,
   type FormatoId,
   type PersonaId,
   type VideoTipoId,
 } from "@/lib/estudio";
+import {
+  MODELO_AUTO_DEFECTO,
+  buscarModelo,
+  costoTexto,
+  herramientasPara,
+  modelosPara,
+} from "@/lib/proveedores-ia";
 
 type Modo = "FOTO" | "VIDEO";
 
@@ -76,7 +80,11 @@ export default function EstudioIA({
   const [formato, setFormato] = useState<FormatoId>("4:5");
   const [videoTipo, setVideoTipo] = useState<VideoTipoId>("giro");
   const [duracion, setDuracion] = useState<5 | 10>(5);
-  const [calidad, setCalidad] = useState<CalidadId>("estandar");
+  const [herramientaId, setHerramientaId] = useState<Record<Modo, string>>({
+    FOTO: "gemini",
+    VIDEO: "aistudio",
+  });
+  const [modeloId, setModeloId] = useState<Record<Modo, string>>(MODELO_AUTO_DEFECTO);
   const [extra, setExtra] = useState("");
   const [copiado, setCopiado] = useState<number | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -110,8 +118,10 @@ export default function EstudioIA({
     ];
   }, [modo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra]);
 
-  const costo =
-    modo === "FOTO" ? COSTO_FOTO[calidad] * 2 : COSTO_VIDEO_SEG[calidad] * duracion;
+  const herramientas = herramientasPara(modo);
+  const herramienta = herramientas.find((h) => h.id === herramientaId[modo]) || herramientas[0];
+  const modelo = buscarModelo(modo, modeloId[modo]);
+  const costo = costoTexto(modelo, modo, duracion);
 
   const cargarTrabajos = useCallback(async () => {
     const r = await fetch(`/api/ia/estudio?productoId=${productoId}`, { cache: "no-store" });
@@ -170,7 +180,7 @@ export default function EstudioIA({
     if (problema) return;
     const que =
       modo === "FOTO" ? "2 fotos (producto real + con modelo)" : `un video de ${duracion} segundos`;
-    if (!confirm(`¿Generar ${que} con IA? Costo aproximado: US$ ${costo.toFixed(2)}.`)) return;
+    if (!confirm(`¿Generar ${que} con ${modelo.nombre}? Costo: ${costo}.`)) return;
     setError("");
     setEnviando(true);
     const r = await fetch("/api/ia/estudio", {
@@ -180,7 +190,7 @@ export default function EstudioIA({
         productoId,
         tipo: modo,
         mediaIds: seleccion,
-        calidad,
+        modeloId: modelo.id,
         escena,
         escenaPersonalizada,
         persona,
@@ -362,9 +372,22 @@ export default function EstudioIA({
 
       {/* Modo gratis */}
       <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-semibold text-green-900">
-            Modo gratis {modo === "FOTO" ? "con Gemini" : "con Google AI Studio (Veo)"}
+        <div>
+          <p className="text-sm font-semibold text-green-900">Modo gratis · ¿con qué IA?</p>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {herramientas.map((h) => (
+              <Chip
+                key={h.id}
+                activo={herramienta.id === h.id}
+                onClick={() => setHerramientaId((prev) => ({ ...prev, [modo]: h.id }))}
+              >
+                {h.nombre}
+              </Chip>
+            ))}
+          </div>
+          <p className="text-xs text-green-900/80 mt-1.5">
+            {herramienta.nombre} ({herramienta.empresa}) · {herramienta.plan}. Los límites gratis los
+            pone cada empresa y pueden cambiar.
           </p>
         </div>
         <ol className="text-sm text-green-950 list-decimal pl-5 flex flex-col gap-1">
@@ -385,18 +408,12 @@ export default function EstudioIA({
           </li>
           <li>
             Abrí{" "}
-            {modo === "FOTO" ? (
-              <a href="https://gemini.google.com/app" target="_blank" rel="noreferrer" className="underline font-medium">
-                Gemini
-              </a>
-            ) : (
-              <a href="https://aistudio.google.com/" target="_blank" rel="noreferrer" className="underline font-medium">
-                Google AI Studio
-              </a>
-            )}{" "}
-            {modo === "FOTO"
-              ? "con tu cuenta de Google, adjuntá la foto con el botón + y pegá la instrucción 1. Descargá el resultado y, en el mismo chat, pegá la instrucción 2."
-              : "con tu cuenta de Google, elegí generar video (Veo), adjuntá la foto y pegá la instrucción."}
+            <a href={herramienta.url} target="_blank" rel="noreferrer" className="underline font-medium">
+              {herramienta.nombre}
+            </a>
+            . {herramienta.pasos[modo]}
+            {modo === "FOTO" &&
+              " Para la segunda foto, pegá la instrucción 2 en el mismo chat o con la misma foto."}
           </li>
           <li>Descargá {modo === "FOTO" ? "las 2 fotos" : "el resultado"} que te devuelve.</li>
           <li>
@@ -440,15 +457,24 @@ export default function EstudioIA({
 
       {/* Modo automático */}
       <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-4 flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-semibold text-violet-900">Modo automático (fal.ai)</p>
-          <div className="flex gap-2">
-            {(["estandar", "premium"] as CalidadId[]).map((c) => (
-              <Chip key={c} activo={calidad === c} onClick={() => setCalidad(c)}>
-                {c === "estandar" ? "Estándar" : "Premium"}
+        <div>
+          <p className="text-sm font-semibold text-violet-900">
+            Modo automático (pago, vía fal.ai) · ¿con qué IA?
+          </p>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {modelosPara(modo).map((m) => (
+              <Chip
+                key={m.id}
+                activo={modelo.id === m.id}
+                onClick={() => setModeloId((prev) => ({ ...prev, [modo]: m.id }))}
+              >
+                {m.nombre}
               </Chip>
             ))}
           </div>
+          <p className="text-xs text-violet-900/80 mt-1.5">
+            {modelo.nombre} ({modelo.empresa}) · {modelo.nota}
+          </p>
         </div>
         {falActivo ? (
           <div className="flex flex-wrap items-center gap-3">
@@ -461,16 +487,16 @@ export default function EstudioIA({
               {enviando ? "Enviando..." : modo === "FOTO" ? "Generar 2 fotos" : "Generar video"}
             </button>
             <span className="text-xs text-violet-900">
-              Costo aproximado: US$ {costo.toFixed(2)}
+              Costo: {costo}
               {modo === "VIDEO" ? " · tarda 1 a 5 minutos" : " · tarda unos segundos"}
             </span>
           </div>
         ) : (
           <p className="text-sm text-violet-900">
-            Genera todo desde el panel con un clic, sin salir. Para activarlo, cargá la clave{" "}
-            <code className="bg-white/70 px-1 rounded">FAL_KEY</code> en Vercel (cuenta en fal.ai,
-            pago por uso: foto ≈ US$ {COSTO_FOTO.estandar.toFixed(2)}, video de 5 s ≈ US${" "}
-            {(COSTO_VIDEO_SEG.estandar * 5).toFixed(2)}).
+            Genera todo desde el panel con un clic, sin salir, con la IA que elijas. Para activarlo,
+            cargá la clave <code className="bg-white/70 px-1 rounded">FAL_KEY</code> en Vercel (cuenta
+            en fal.ai, pago por uso). Con {modelo.nombre}: {costo}
+            {modo === "FOTO" ? " por las 2 fotos" : ` por un video de ${duracion} s`}.
           </p>
         )}
 

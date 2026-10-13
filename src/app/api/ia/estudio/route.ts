@@ -5,8 +5,6 @@ import { getSession } from "@/lib/auth";
 import { maximoPorTipo } from "@/lib/media";
 import { enviarAFal, estadoFal, falConfigurado, resultadoFal } from "@/lib/fal";
 import {
-  MODELO_FOTO,
-  MODELO_VIDEO,
   promptVideo,
   promptsPackFoto,
   type CalidadId,
@@ -15,6 +13,7 @@ import {
   type PersonaId,
   type VideoTipoId,
 } from "@/lib/estudio";
+import { buscarModelo } from "@/lib/proveedores-ia";
 
 export const maxDuration = 60;
 
@@ -119,6 +118,7 @@ export async function POST(req: NextRequest) {
     tipo?: "FOTO" | "VIDEO";
     mediaIds?: string[];
     calidad?: CalidadId;
+    modeloId?: string;
     escena?: EscenaId;
     escenaPersonalizada?: string;
     persona?: PersonaId;
@@ -133,6 +133,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
   }
   const calidad: CalidadId = body.calidad === "premium" ? "premium" : "estandar";
+  const modelo = buscarModelo(tipo, body.modeloId, calidad);
 
   const producto = await prisma.producto.findUnique({
     where: { id: productoId },
@@ -175,7 +176,9 @@ export async function POST(req: NextRequest) {
   const escena = body.escena || "estudio";
   const persona = body.persona || "ninguna";
 
-  const pedidos: { modelo: string; prompt: string; input: Record<string, unknown> }[] = [];
+  const pedidos: { prompt: string; input: Record<string, unknown> }[] = [];
+  const formato = body.formato || "4:5";
+  const duracion = body.duracion === 10 ? 10 : 5;
 
   if (tipo === "FOTO") {
     const pack = promptsPackFoto({
@@ -183,20 +186,13 @@ export async function POST(req: NextRequest) {
       escena,
       escenaPersonalizada: body.escenaPersonalizada,
       persona,
-      formato: body.formato || "4:5",
+      formato,
       extra: body.extra,
     });
     for (const p of pack) {
       pedidos.push({
-        modelo: MODELO_FOTO[calidad],
         prompt: p.prompt,
-        input: {
-          prompt: p.prompt,
-          image_urls: urls.slice(0, 4),
-          num_images: 1,
-          aspect_ratio: body.formato || "4:5",
-          output_format: "jpeg",
-        },
+        input: modelo.armar({ prompt: p.prompt, urls, formato, duracion }),
       });
     }
   } else {
@@ -215,25 +211,16 @@ export async function POST(req: NextRequest) {
       persona,
       extra: body.extra,
     });
-    const duracion = body.duracion === 10 ? 10 : 5;
-    const input: Record<string, unknown> = {
-      prompt,
-      start_image_url: urls[0],
-      duration: duracion,
-      generate_audio: false,
-      negative_prompt: "blur, distortion, deformed product, changed logo, extra text, watermark, low quality",
-    };
-    if (urls.length > 1) input.end_image_url = urls[urls.length - 1];
-    pedidos.push({ modelo: MODELO_VIDEO[calidad], prompt, input });
+    pedidos.push({ prompt, input: modelo.armar({ prompt, urls, formato, duracion }) });
   }
 
   try {
     const trabajos = [];
     for (const p of pedidos) {
-      const { statusUrl, responseUrl } = await enviarAFal(p.modelo, p.input);
+      const { statusUrl, responseUrl } = await enviarAFal(modelo.endpoint, p.input);
       trabajos.push(
         await prisma.trabajoIA.create({
-          data: { productoId, tipo, modelo: p.modelo, prompt: p.prompt, statusUrl, responseUrl },
+          data: { productoId, tipo, modelo: modelo.endpoint, prompt: p.prompt, statusUrl, responseUrl },
           select: { id: true, tipo: true, estado: true, error: true, createdAt: true, mediaId: true },
         })
       );
