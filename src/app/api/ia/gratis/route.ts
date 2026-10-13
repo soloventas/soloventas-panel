@@ -84,6 +84,8 @@ export async function POST(req: NextRequest) {
     texto?: string;
     textoPos?: TextoPosId;
     estilos?: string[];
+    // "Más como esta": nuevas versiones a partir de un resultado anterior.
+    variarDe?: string;
   };
   const { productoId } = body;
   if (!productoId) return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
@@ -108,12 +110,28 @@ export async function POST(req: NextRequest) {
   });
   if (!producto) return NextResponse.json({ error: "Producto no encontrado." }, { status: 404 });
 
+  // Variaciones de un resultado: mismo pedido, otra composición. El resultado
+  // viene como primera referencia y las fotos reales del producto después.
+  let base: { prompt: string } | null = null;
+  if (body.variarDe) {
+    base = await prisma.trabajoIA.findFirst({
+      where: { id: body.variarDe, productoId, tipo: "FOTO" },
+      select: { prompt: true },
+    });
+    if (!base) return NextResponse.json({ error: "No se encontró esa versión." }, { status: 404 });
+  }
+
   const fotoTipo: FotoTipoId =
     body.fotoTipo === "escena" || body.fotoTipo === "catalogo" || body.fotoTipo === "mejorar"
       ? body.fotoTipo
       : "pack";
   const formato: FormatoId = body.formato === "1:1" || body.formato === "9:16" ? body.formato : "4:5";
-  const prompts = promptsFotos(fotoTipo, {
+  const prompts = base
+    ? [1, 2].map(() => ({
+        titulo: "Más como esta",
+        prompt: `Create a fresh alternative version of the first reference image: keep the same advertising style, mood and color palette, but change the composition, camera angle, pose and layout so it looks like a new option. The product must stay identical to the real product photos. ${base!.prompt}`,
+      }))
+    : promptsFotos(fotoTipo, {
     producto: producto.nombre,
     ficha: fichaDe(producto),
     escena: body.escena || "estudio",
@@ -164,7 +182,8 @@ export async function POST(req: NextRequest) {
             productoId,
             tipo: "FOTO",
             modelo: modelo.modelo,
-            prompt: p.prompt,
+            // En las variaciones guardamos el pedido original para poder seguir variando.
+            prompt: base ? base.prompt : p.prompt,
             statusUrl: "",
             responseUrl: "",
             estado: "LISTO",
