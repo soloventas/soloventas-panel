@@ -34,29 +34,137 @@ type Trabajo = {
   createdAt: string;
 };
 
+// Qué se puede hacer: cada tarea define si es foto o video y qué variante.
+type Tarea = {
+  id: string;
+  modo: Modo;
+  fotoTipo?: FotoTipoId;
+  videoTipo?: VideoTipoId;
+  icono: string;
+  nombre: string;
+  ayuda: string;
+  recomendada?: boolean;
+};
+
+const ICONOS_FOTO: Record<FotoTipoId, string> = {
+  pack: "👩‍🦰",
+  escena: "🏝️",
+  catalogo: "⬜",
+  mejorar: "✨",
+};
+const ICONOS_VIDEO: Record<VideoTipoId, string> = {
+  giro: "🔄",
+  persona: "🎬",
+  colores: "🎨",
+};
+
+const TAREAS: Tarea[] = [
+  ...FOTO_TIPOS.map((f) => ({
+    id: `foto-${f.id}`,
+    modo: "FOTO" as Modo,
+    fotoTipo: f.id,
+    icono: ICONOS_FOTO[f.id],
+    nombre: f.nombre,
+    ayuda: f.ayuda,
+    recomendada: f.id === "pack",
+  })),
+  ...VIDEO_TIPOS.map((v) => ({
+    id: `video-${v.id}`,
+    modo: "VIDEO" as Modo,
+    videoTipo: v.id,
+    icono: ICONOS_VIDEO[v.id],
+    nombre: `Video: ${v.nombre}`,
+    ayuda: v.ayuda,
+  })),
+];
+
+// La IA elegida: una web gratis o un modelo pago automático.
+type EleccionIA = { clase: "gratis" | "paga"; id: string };
+
 function Chip({
   activo,
   onClick,
   children,
-  disabled,
 }: {
   activo: boolean;
   onClick: () => void;
   children: React.ReactNode;
-  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
       className={`rounded-full px-3 py-1.5 text-xs border transition ${
         activo
           ? "bg-navy text-white border-navy"
           : "bg-white text-gray-700 border-gray-300 hover:border-navy"
-      } disabled:opacity-40`}
+      }`}
     >
       {children}
+    </button>
+  );
+}
+
+function Paso({
+  numero,
+  titulo,
+  children,
+}: {
+  numero: number;
+  titulo: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-2.5">
+      <p className="text-sm font-semibold text-navy flex items-center gap-2">
+        <span className="w-6 h-6 rounded-full bg-navy text-white text-xs flex items-center justify-center">
+          {numero}
+        </span>
+        {titulo}
+      </p>
+      {children}
+    </section>
+  );
+}
+
+function TarjetaIA({
+  activa,
+  onClick,
+  nombre,
+  empresa,
+  detalle,
+  etiqueta,
+  recomendada,
+  apagada,
+}: {
+  activa: boolean;
+  onClick: () => void;
+  nombre: string;
+  empresa: string;
+  detalle: string;
+  etiqueta: string;
+  recomendada?: boolean;
+  apagada?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-left rounded-lg border-2 p-2.5 transition flex flex-col gap-0.5 ${
+        activa ? "border-navy bg-navy/5" : "border-gray-200 hover:border-gray-400 bg-white"
+      } ${apagada && !activa ? "opacity-60" : ""}`}
+    >
+      <span className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-gray-900">
+          {recomendada && "⭐ "}
+          {nombre}
+        </span>
+        <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-gray-100 text-gray-700 whitespace-nowrap">
+          {etiqueta}
+        </span>
+      </span>
+      <span className="text-[11px] text-gray-500">{empresa}</span>
+      <span className="text-[11px] text-gray-600 leading-snug">{detalle}</span>
     </button>
   );
 }
@@ -74,20 +182,26 @@ export default function EstudioIA({
   falActivo: boolean;
   onNuevos: () => void;
 }) {
-  const [modo, setModo] = useState<Modo>("FOTO");
+  const [tareaId, setTareaId] = useState(TAREAS[0].id);
   const [seleccion, setSeleccion] = useState<string[]>([]);
   const [escena, setEscena] = useState<EscenaId>("playa");
   const [escenaPersonalizada, setEscenaPersonalizada] = useState("");
   const [persona, setPersona] = useState<PersonaId>("mujer");
   const [formato, setFormato] = useState<FormatoId>("4:5");
-  const [fotoTipo, setFotoTipo] = useState<FotoTipoId>("pack");
-  const [videoTipo, setVideoTipo] = useState<VideoTipoId>("giro");
   const [duracion, setDuracion] = useState<5 | 10>(5);
-  const [herramientaId, setHerramientaId] = useState<Record<Modo, string>>({
-    FOTO: "gemini",
-    VIDEO: "aistudio",
-  });
-  const [modeloId, setModeloId] = useState<Record<Modo, string>>(MODELO_AUTO_DEFECTO);
+  // Por defecto, la recomendada: paga si está la clave de fal.ai, si no la gratis.
+  const [ia, setIa] = useState<Record<Modo, EleccionIA>>(() =>
+    falActivo
+      ? {
+          FOTO: { clase: "paga", id: MODELO_AUTO_DEFECTO.FOTO },
+          VIDEO: { clase: "paga", id: MODELO_AUTO_DEFECTO.VIDEO },
+        }
+      : {
+          FOTO: { clase: "gratis", id: herramientasPara("FOTO")[0].id },
+          VIDEO: { clase: "gratis", id: herramientasPara("VIDEO")[0].id },
+        }
+  );
+  const [verTodas, setVerTodas] = useState(false);
   const [extra, setExtra] = useState("");
   const [copiado, setCopiado] = useState<number | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -96,6 +210,13 @@ export default function EstudioIA({
   const listosAntes = useRef<Set<string>>(new Set());
   const inicializado = useRef(false);
 
+  const tarea = TAREAS.find((t) => t.id === tareaId) || TAREAS[0];
+  const modo = tarea.modo;
+  const fotoTipo: FotoTipoId = tarea.fotoTipo || "pack";
+  const videoTipo: VideoTipoId = tarea.videoTipo || "giro";
+  const herramientaFoto = FOTO_TIPOS.find((f) => f.id === fotoTipo)!;
+  const usaEscena = modo === "VIDEO" || herramientaFoto.usaEscena;
+  const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona";
   const maxSeleccion = modo === "FOTO" ? 4 : 2;
 
   // Por defecto usamos la primera foto como base.
@@ -107,8 +228,6 @@ export default function EstudioIA({
     });
   }, [fotos, maxSeleccion]);
 
-  // En fotos siempre sale el pack de 2 (producto real + con modelo), para
-  // publicarlas juntas como carrusel.
   const prompts = useMemo(() => {
     if (modo === "FOTO") {
       return promptsFotos(fotoTipo, { producto, escena, escenaPersonalizada, persona, formato, extra });
@@ -122,13 +241,21 @@ export default function EstudioIA({
   }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra]);
 
   const herramientas = herramientasPara(modo);
-  const herramienta = herramientas.find((h) => h.id === herramientaId[modo]) || herramientas[0];
-  const modelo = buscarModelo(modo, modeloId[modo]);
-  const herramientaFoto = FOTO_TIPOS.find((f) => f.id === fotoTipo)!;
-  const usaEscena = modo === "VIDEO" || herramientaFoto.usaEscena;
-  const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona";
+  const modelos = modelosPara(modo);
+  const eleccion = ia[modo];
+  const herramienta = herramientas.find((h) => h.id === eleccion.id) || herramientas[0];
+  // Para no llenar la pantalla: se ven las primeras y la elegida; el resto con "Ver todas".
+  const VISIBLES = 4;
+  const herramientasVisibles = verTodas
+    ? herramientas
+    : herramientas.filter((h, i) => i < VISIBLES || (eleccion.clase === "gratis" && h.id === herramienta.id));
+  const modelo = buscarModelo(modo, eleccion.clase === "paga" ? eleccion.id : undefined);
   const cantidadFotos = modo === "FOTO" ? prompts.length : 0;
   const costo = costoTexto(modelo, modo, duracion, cantidadFotos);
+
+  function elegirIA(e: EleccionIA) {
+    setIa((prev) => ({ ...prev, [modo]: e }));
+  }
 
   const cargarTrabajos = useCallback(async () => {
     const r = await fetch(`/api/ia/estudio?productoId=${productoId}`, { cache: "no-store" });
@@ -187,7 +314,7 @@ export default function EstudioIA({
     if (problema) return;
     const que =
       modo === "FOTO"
-        ? fotoTipo === "pack"
+        ? cantidadFotos === 2
           ? "2 fotos (producto real + con modelo)"
           : `1 foto (${herramientaFoto.nombre.toLowerCase()})`
         : `un video de ${duracion} segundos`;
@@ -230,41 +357,55 @@ export default function EstudioIA({
       <div className="bg-white border border-gray-200 rounded-xl p-5">
         <p className="text-xs font-bold uppercase tracking-wide text-gold mb-2">Estudio IA</p>
         <p className="text-sm text-gray-600">
-          Subí al menos una foto real del producto para crear fotos y videos con IA.
+          Subí al menos una foto real del producto (arriba, en Fotos y videos) para crear fotos y
+          videos con IA.
         </p>
       </div>
     );
   }
 
+  const pasos = herramienta.pasos[modo];
+
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-6">
+      <div>
         <p className="text-xs font-bold uppercase tracking-wide text-gold">Estudio IA</p>
-        <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
-          {(["FOTO", "VIDEO"] as Modo[]).map((m) => (
+        <p className="text-sm text-gray-600 mt-0.5">
+          Elegí qué querés hacer, con qué fotos y con qué IA. Lo marcado con ⭐ es lo que mejor vende.
+        </p>
+      </div>
+
+      {/* 1. Qué hacer */}
+      <Paso numero={1} titulo="¿Qué querés hacer?">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {TAREAS.map((t) => (
             <button
-              key={m}
+              key={t.id}
               type="button"
-              onClick={() => setModo(m)}
-              className={`rounded-md px-3 py-1 text-sm ${
-                modo === m ? "bg-white shadow-sm font-semibold text-navy" : "text-gray-600"
+              onClick={() => setTareaId(t.id)}
+              className={`text-left rounded-lg border-2 p-2.5 transition ${
+                tarea.id === t.id ? "border-navy bg-navy/5" : "border-gray-200 hover:border-gray-400"
               }`}
             >
-              {m === "FOTO" ? "✨ Foto con IA" : "🎬 Video con IA"}
+              <span className="text-lg leading-none">{t.icono}</span>
+              <span className="block text-sm font-semibold text-gray-900 mt-1">
+                {t.recomendada && "⭐ "}
+                {t.nombre}
+              </span>
+              <span className="block text-[10px] uppercase tracking-wide text-gray-400 mt-0.5">
+                {t.modo === "FOTO" ? "Foto" : "Video"}
+              </span>
             </button>
           ))}
         </div>
-      </div>
+        <p className="text-xs text-gray-500">{tarea.ayuda}</p>
+      </Paso>
 
-      {/* Fotos de base */}
-      <div>
-        <p className="text-sm font-medium mb-1">
-          {modo === "FOTO" ? "Foto(s) del producto" : "Foto(s) de base del video"}{" "}
-          <span className="text-gray-400 font-normal">
-            (hasta {maxSeleccion}
-            {modo === "VIDEO" ? ": la primera es el inicio y la segunda el final" : ""})
-          </span>
-        </p>
+      {/* 2. Fotos de base */}
+      <Paso
+        numero={2}
+        titulo={`${modo === "FOTO" ? "Foto(s) del producto" : "Foto(s) de base del video"} · hasta ${maxSeleccion}`}
+      >
         <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
           {fotos.map((f) => {
             const pos = seleccion.indexOf(f.id);
@@ -288,260 +429,243 @@ export default function EstudioIA({
             );
           })}
         </div>
-      </div>
-
-      {/* Herramienta de foto */}
-      {modo === "FOTO" && (
-        <div>
-          <p className="text-sm font-medium mb-2">¿Qué querés hacer con la foto?</p>
-          <div className="flex flex-wrap gap-2">
-            {FOTO_TIPOS.map((f) => (
-              <Chip key={f.id} activo={fotoTipo === f.id} onClick={() => setFotoTipo(f.id)}>
-                {f.nombre}
-              </Chip>
-            ))}
-          </div>
-          <p className="text-xs text-gray-500 mt-1.5">{herramientaFoto.ayuda}</p>
-        </div>
-      )}
-
-      {/* Tipo de video */}
-      {modo === "VIDEO" && (
-        <div>
-          <p className="text-sm font-medium mb-2">Tipo de video</p>
-          <div className="flex flex-wrap gap-2">
-            {VIDEO_TIPOS.map((v) => (
-              <Chip key={v.id} activo={videoTipo === v.id} onClick={() => setVideoTipo(v.id)}>
-                {v.nombre}
-              </Chip>
-            ))}
-          </div>
-          <p className="text-xs text-gray-500 mt-1.5">
-            {VIDEO_TIPOS.find((v) => v.id === videoTipo)?.ayuda}
-          </p>
-        </div>
-      )}
-
-      {/* Escena */}
-      {usaEscena && (
-      <div>
-        <p className="text-sm font-medium mb-2">Lugar / ambiente</p>
-        <div className="flex flex-wrap gap-2">
-          {ESCENAS.map((e) => (
-            <Chip key={e.id} activo={escena === e.id} onClick={() => setEscena(e.id)}>
-              {e.nombre}
-            </Chip>
-          ))}
-        </div>
-        {escena === "personalizada" && (
-          <input
-            value={escenaPersonalizada}
-            onChange={(e) => setEscenaPersonalizada(e.target.value)}
-            placeholder="Describilo (podés escribir en español): ej. un festival de música al aire libre"
-            className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-          />
+        {modo === "VIDEO" && (
+          <p className="text-xs text-gray-500">La foto 1 es el inicio del video y la 2, el final.</p>
         )}
-      </div>
-      )}
+      </Paso>
 
-      {/* Persona */}
-      {usaPersona && (
-        <div>
-          <p className="text-sm font-medium mb-2">¿Quién aparece?</p>
-          <div className="flex flex-wrap gap-2">
-            {PERSONAS.filter((p) => p.id !== "ninguna").map((p) => (
-              <Chip key={p.id} activo={persona === p.id} onClick={() => setPersona(p.id)}>
-                {p.nombre}
-              </Chip>
-            ))}
-          </div>
-          <p className="text-xs text-gray-500 mt-1.5">
-            Siempre son personas adultas creadas por IA, que no existen.
-            {modo === "FOTO" &&
-              fotoTipo === "pack" &&
-              " Se arman 2 fotos: el producto real solo y el producto usado por la modelo en el lugar elegido."}
-          </p>
-        </div>
-      )}
-
-      {/* Formato / duración */}
-      <div className="flex flex-wrap gap-6">
-        {modo === "FOTO" ? (
+      {/* 3. Cómo lo querés */}
+      <Paso numero={3} titulo="¿Cómo lo querés?">
+        {usaEscena && (
           <div>
-            <p className="text-sm font-medium mb-2">Formato</p>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">Lugar / ambiente</p>
             <div className="flex flex-wrap gap-2">
-              {FORMATOS.map((f) => (
-                <Chip key={f.id} activo={formato === f.id} onClick={() => setFormato(f.id)}>
-                  {f.nombre}
+              {ESCENAS.map((e) => (
+                <Chip key={e.id} activo={escena === e.id} onClick={() => setEscena(e.id)}>
+                  {e.nombre}
                 </Chip>
               ))}
             </div>
-          </div>
-        ) : (
-          <div>
-            <p className="text-sm font-medium mb-2">Duración</p>
-            <div className="flex gap-2">
-              {[5, 10].map((d) => (
-                <Chip key={d} activo={duracion === d} onClick={() => setDuracion(d as 5 | 10)}>
-                  {d} segundos
-                </Chip>
-              ))}
-            </div>
+            {escena === "personalizada" && (
+              <input
+                value={escenaPersonalizada}
+                onChange={(e) => setEscenaPersonalizada(e.target.value)}
+                placeholder="Describilo (podés escribir en español): ej. un festival de música al aire libre"
+                className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+              />
+            )}
           </div>
         )}
-      </div>
 
-      <input
-        value={extra}
-        onChange={(e) => setExtra(e.target.value)}
-        placeholder="Detalle extra (opcional): ej. luz de atardecer, tonos pastel, fondo con palmeras"
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-      />
+        {usaPersona && (
+          <div>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">¿Quién aparece?</p>
+            <div className="flex flex-wrap gap-2">
+              {PERSONAS.filter((p) => p.id !== "ninguna").map((p) => (
+                <Chip key={p.id} activo={persona === p.id} onClick={() => setPersona(p.id)}>
+                  {p.nombre}
+                </Chip>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-1.5">
+              Siempre son personas adultas creadas por IA, que no existen.
+            </p>
+          </div>
+        )}
 
-      {problema && <p className="text-xs text-amber-700">{problema}</p>}
-
-      {/* Modo gratis */}
-      <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
         <div>
-          <p className="text-sm font-semibold text-green-900">Modo gratis · ¿con qué IA?</p>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {herramientas.map((h) => (
-              <Chip
+          <p className="text-xs font-medium text-gray-700 mb-1.5">
+            {modo === "FOTO" ? "Formato" : "Duración"}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {modo === "FOTO"
+              ? FORMATOS.map((f) => (
+                  <Chip key={f.id} activo={formato === f.id} onClick={() => setFormato(f.id)}>
+                    {f.nombre}
+                  </Chip>
+                ))
+              : [5, 10].map((d) => (
+                  <Chip key={d} activo={duracion === d} onClick={() => setDuracion(d as 5 | 10)}>
+                    {d} segundos
+                  </Chip>
+                ))}
+          </div>
+        </div>
+
+        <input
+          value={extra}
+          onChange={(e) => setExtra(e.target.value)}
+          placeholder="Detalle extra (opcional): ej. luz de atardecer, tonos pastel, fondo con palmeras"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+        />
+      </Paso>
+
+      {/* 4. Con qué IA */}
+      <Paso numero={4} titulo="¿Con qué IA?">
+        <div>
+          <p className="text-xs font-medium text-gray-700 mb-1.5">
+            Gratis · la usás en su web, el panel te arma la instrucción
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {herramientasVisibles.map((h) => (
+              <TarjetaIA
                 key={h.id}
-                activo={herramienta.id === h.id}
-                onClick={() => setHerramientaId((prev) => ({ ...prev, [modo]: h.id }))}
-              >
-                {h.recomendado?.includes(modo) ? `⭐ ${h.nombre}` : h.nombre}
-              </Chip>
+                activa={eleccion.clase === "gratis" && herramienta.id === h.id}
+                onClick={() => elegirIA({ clase: "gratis", id: h.id })}
+                nombre={h.nombre}
+                empresa={h.empresa}
+                detalle={h.plan}
+                etiqueta="Gratis"
+                recomendada={h.recomendado?.includes(modo)}
+              />
             ))}
           </div>
-          <p className="text-xs text-green-900/80 mt-1.5">
-            {herramienta.nombre} ({herramienta.empresa}) · {herramienta.plan}. ⭐ = la que mejor deja el
-            producto para vender. Los límites gratis los pone cada empresa y pueden cambiar.
-          </p>
-        </div>
-        <ol className="text-sm text-green-950 list-decimal pl-5 flex flex-col gap-1">
-          <li>
-            Guardá la foto de base en tu compu o celular:{" "}
-            {seleccionadas.map((f, i) => (
-              <a
-                key={f.id}
-                href={f.url}
-                target="_blank"
-                rel="noreferrer"
-                className="underline mr-2"
-              >
-                abrir foto {i + 1}
-              </a>
-            ))}
-            (en la foto, clic derecho → Guardar imagen).
-          </li>
-          <li>
-            Abrí{" "}
-            <a href={herramienta.url} target="_blank" rel="noreferrer" className="underline font-medium">
-              {herramienta.nombre}
-            </a>
-            . {herramienta.pasos[modo]}
-            {cantidadFotos === 2 &&
-              " Para la segunda foto, pegá la instrucción 2 en el mismo chat o con la misma foto."}
-          </li>
-          <li>Descargá {cantidadFotos === 2 ? "las 2 fotos" : "el resultado"} que te devuelve.</li>
-          <li>
-            {modo === "FOTO" ? "Subilas" : "Subilo"} arriba en <b>Fotos y videos</b>, tildando{" "}
-            <i>&quot;Son fotos o videos generados con IA&quot;</i>. Después las revisás y las aprobás.
-            {cantidadFotos === 2 &&
-              " Para publicarlas juntas elegí “Carrusel” en Publicar en redes."}
-          </li>
-        </ol>
-        {prompts.map((p, i) => (
-          <div key={p.titulo} className="flex flex-col gap-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-green-900">
-                {prompts.length > 1 ? `Instrucción ${i + 1} · ` : ""}
-                {p.titulo}
-              </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-1.5">
+            <p className="text-[11px] text-gray-400">
+              Los límites gratis los pone cada empresa y pueden cambiar.
+            </p>
+            {herramientas.length > herramientasVisibles.length || verTodas ? (
               <button
                 type="button"
-                onClick={() => copiar(i)}
-                disabled={Boolean(problema)}
-                className="rounded-md bg-green-700 text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90 disabled:opacity-50"
+                onClick={() => setVerTodas((v) => !v)}
+                className="text-xs font-semibold text-navy underline"
               >
-                {copiado === i ? "✓ Copiada" : `Copiar instrucción${prompts.length > 1 ? ` ${i + 1}` : ""}`}
+                {verTodas ? "Ver menos" : `Ver todas las gratis (${herramientas.length})`}
               </button>
-            </div>
-            <textarea
-              readOnly
-              value={p.prompt}
-              rows={4}
-              onFocus={(e) => e.currentTarget.select()}
-              className="w-full rounded-md border border-green-200 bg-white px-3 py-2 text-xs text-gray-700 font-mono"
-            />
+            ) : null}
           </div>
-        ))}
-        <p className="text-xs text-green-900/80">
-          La instrucción va en inglés porque las IA la entienden mejor. Si el resultado cambia el
-          producto (color, logo, forma), pedile en el mismo chat: &quot;keep the product exactly as in
-          the original photo&quot;.
-        </p>
-      </div>
-
-      {/* Modo automático */}
-      <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-4 flex flex-col gap-3">
+        </div>
         <div>
-          <p className="text-sm font-semibold text-violet-900">
-            Modo automático (pago, vía fal.ai) · ¿con qué IA?
+          <p className="text-xs font-medium text-gray-700 mb-1.5">
+            Paga · la hace el panel solo, con un clic
+            {!falActivo && " (necesita activar fal.ai)"}
           </p>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {modelosPara(modo).map((m) => (
-              <Chip
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {modelos.map((m) => (
+              <TarjetaIA
                 key={m.id}
-                activo={modelo.id === m.id}
-                onClick={() => setModeloId((prev) => ({ ...prev, [modo]: m.id }))}
-              >
-                {m.recomendado ? `⭐ ${m.nombre}` : m.nombre}
-              </Chip>
+                activa={eleccion.clase === "paga" && modelo.id === m.id}
+                onClick={() => elegirIA({ clase: "paga", id: m.id })}
+                nombre={m.nombre}
+                empresa={m.empresa}
+                detalle={m.nota}
+                etiqueta={costoTexto(m, modo, duracion, cantidadFotos)}
+                recomendada={m.recomendado}
+                apagada={!falActivo}
+              />
             ))}
           </div>
-          <p className="text-xs text-violet-900/80 mt-1.5">
-            {modelo.nombre} ({modelo.empresa}) · {modelo.nota}
+        </div>
+      </Paso>
+
+      {problema && <p className="text-sm text-amber-700">{problema}</p>}
+
+      {/* 5. Hacerlo */}
+      {eleccion.clase === "gratis" ? (
+        <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-green-900">
+              Hacelo gratis con {herramienta.nombre}
+            </p>
+            <a
+              href={herramienta.url}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md bg-green-700 text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90"
+            >
+              Abrir {herramienta.nombre} ↗
+            </a>
+          </div>
+          <ol className="text-sm text-green-950 list-decimal pl-5 flex flex-col gap-1">
+            <li>
+              Guardá la foto de base:{" "}
+              {seleccionadas.map((f, i) => (
+                <a key={f.id} href={f.url} target="_blank" rel="noreferrer" className="underline mr-2">
+                  abrir foto {i + 1}
+                </a>
+              ))}
+              (clic derecho → Guardar imagen).
+            </li>
+            <li>
+              Copiá la instrucción de abajo y abrí {herramienta.nombre}. {pasos}
+              {cantidadFotos === 2 && " Para la segunda foto, pegá la instrucción 2."}
+            </li>
+            <li>
+              Descargá el resultado y subilo arriba en <b>Fotos y videos</b>, tildando{" "}
+              <i>&quot;Son fotos o videos generados con IA&quot;</i>.
+              {cantidadFotos === 2 && " Para publicarlas juntas elegí “Carrusel” en Publicar en redes."}
+            </li>
+          </ol>
+          {prompts.map((p, i) => (
+            <div key={p.titulo} className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-green-900">
+                  {prompts.length > 1 ? `Instrucción ${i + 1} · ` : ""}
+                  {p.titulo}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => copiar(i)}
+                  disabled={Boolean(problema)}
+                  className="rounded-md bg-white border border-green-700 text-green-800 text-xs font-semibold px-3 py-1.5 hover:bg-green-100 disabled:opacity-50"
+                >
+                  {copiado === i ? "✓ Copiada" : `Copiar instrucción${prompts.length > 1 ? ` ${i + 1}` : ""}`}
+                </button>
+              </div>
+              <textarea
+                readOnly
+                value={p.prompt}
+                rows={3}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full rounded-md border border-green-200 bg-white px-3 py-2 text-xs text-gray-700 font-mono"
+              />
+            </div>
+          ))}
+          <p className="text-xs text-green-900/80">
+            La instrucción va en inglés porque las IA la entienden mejor. Si el resultado cambia el
+            producto, pedile en el mismo chat: &quot;keep the product exactly as in the original
+            photo&quot;.
           </p>
         </div>
-        {falActivo ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={generar}
-              disabled={Boolean(problema) || enviando}
-              className="rounded-md bg-violet-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
-            >
-              {enviando
-                ? "Enviando..."
-                : modo === "FOTO"
-                ? cantidadFotos === 2
-                  ? "Generar 2 fotos"
-                  : "Generar foto"
-                : "Generar video"}
-            </button>
-            <span className="text-xs text-violet-900">
-              Costo: {costo}
-              {modo === "VIDEO" ? " · tarda 1 a 5 minutos" : " · tarda unos segundos"}
-            </span>
-          </div>
-        ) : (
-          <p className="text-sm text-violet-900">
-            Genera todo desde el panel con un clic, sin salir, con la IA que elijas. Para activarlo,
-            cargá la clave <code className="bg-white/70 px-1 rounded">FAL_KEY</code> en Vercel (cuenta
-            en fal.ai, pago por uso). Con {modelo.nombre}: {costo}
-            {modo === "FOTO"
-              ? cantidadFotos === 2
-                ? " por las 2 fotos"
-                : " por la foto"
-              : ` por un video de ${duracion} s`}.
+      ) : (
+        <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-4 flex flex-col gap-3">
+          <p className="text-sm font-semibold text-violet-900">
+            Hacelo automático con {modelo.nombre}
           </p>
-        )}
+          {falActivo ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={generar}
+                disabled={Boolean(problema) || enviando}
+                className="rounded-md bg-violet-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+              >
+                {enviando
+                  ? "Enviando..."
+                  : modo === "FOTO"
+                  ? cantidadFotos === 2
+                    ? "Generar 2 fotos"
+                    : "Generar foto"
+                  : "Generar video"}
+              </button>
+              <span className="text-xs text-violet-900">
+                Costo: {costo}
+                {modo === "VIDEO" ? " · tarda 1 a 5 minutos" : " · tarda unos segundos"}
+              </span>
+            </div>
+          ) : (
+            <p className="text-sm text-violet-900">
+              Para activarlo, cargá la clave <code className="bg-white/70 px-1 rounded">FAL_KEY</code>{" "}
+              en Vercel (cuenta en fal.ai, pago por uso). Mientras tanto elegí una IA gratis.
+            </p>
+          )}
+        </div>
+      )}
 
-        {trabajos.length > 0 && (
-          <ul className="flex flex-col gap-1.5 border-t border-violet-200 pt-3">
+      {trabajos.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-semibold text-gray-700">Lo que le pediste a la IA</p>
+          <ul className="flex flex-col gap-1.5">
             {trabajos.map((t) => (
               <li key={t.id} className="text-sm flex flex-wrap items-center gap-x-3">
                 <span className="font-medium">{t.tipo === "FOTO" ? "Foto" : "Video"}</span>
@@ -565,8 +689,8 @@ export default function EstudioIA({
               </li>
             ))}
           </ul>
-        )}
-      </div>
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

@@ -29,7 +29,7 @@ export const FOTO_TIPOS: {
 }[] = [
   {
     id: "pack",
-    nombre: "⭐ Producto real + modelo",
+    nombre: "Producto real + modelo",
     ayuda: "Salen 2 fotos para carrusel: el producto solo y una persona usándolo en el lugar elegido. Es la que mejor vende.",
     usaEscena: true,
     usaPersona: true,
