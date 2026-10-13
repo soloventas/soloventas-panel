@@ -18,7 +18,7 @@ export default function SeccionMedios({
   productoId: string;
   producto: string;
   inicial: Media[];
-  redes: { instagram: string | null; facebook: string | null };
+  redes: { instagram: string | null; facebook: string | null; tiktok: string | null };
   iaActiva: boolean;
   falActivo: boolean;
 }) {

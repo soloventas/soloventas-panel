@@ -2,13 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Media } from "./media-manager";
+import TikTokOpciones, {
+  OPCIONES_TIKTOK_INICIALES,
+  problemaTikTok,
+  type Creador,
+  type OpcionesTikTok,
+} from "./tiktok-opciones";
 
 type Formato = "FOTO" | "CARRUSEL" | "VIDEO";
-type Red = "INSTAGRAM" | "FACEBOOK";
+type Red = "INSTAGRAM" | "FACEBOOK" | "TIKTOK";
 
 type Publicacion = {
   id: string;
-  red: Red | "YOUTUBE" | "TIKTOK";
+  red: Red | "YOUTUBE";
   formato: Formato;
   estado: "PROCESANDO" | "PUBLICADA" | "ERROR";
   permalink: string | null;
@@ -40,7 +46,7 @@ export default function Publicador({
 }: {
   productoId: string;
   media: Media[];
-  redes: { instagram: string | null; facebook: string | null };
+  redes: { instagram: string | null; facebook: string | null; tiktok: string | null };
   iaActiva: boolean;
 }) {
   const fotos = useMemo(() => media.filter((m) => m.tipo === "FOTO"), [media]);
@@ -61,13 +67,29 @@ export default function Publicador({
   const [publicando, setPublicando] = useState(false);
   const [error, setError] = useState("");
   const [historial, setHistorial] = useState<Publicacion[]>([]);
+  const [opcionesTikTok, setOpcionesTikTok] = useState<OpcionesTikTok>(OPCIONES_TIKTOK_INICIALES);
+  const [creadorTikTok, setCreadorTikTok] = useState<Creador | null>(null);
+  const [duracionVideo, setDuracionVideo] = useState<number | null>(null);
 
   // Selección por defecto cada vez que cambia el formato o los archivos.
   useEffect(() => {
     if (formato === "FOTO") setSeleccion(fotos[0] ? [fotos[0].id] : []);
     if (formato === "CARRUSEL") setSeleccion(fotos.slice(0, MAX_CARRUSEL).map((f) => f.id));
     if (formato === "VIDEO") setSeleccion(videos[0] ? [videos[0].id] : []);
+    // TikTok solo acepta videos.
+    if (formato !== "VIDEO") setDestinos((prev) => prev.filter((r) => r !== "TIKTOK"));
   }, [formato, fotos, videos]);
+
+  // Duración del video elegido, para avisar si TikTok no lo acepta.
+  const videoElegido = formato === "VIDEO" ? videos.find((v) => v.id === seleccion[0]) : undefined;
+  useEffect(() => {
+    setDuracionVideo(null);
+    if (!videoElegido) return;
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.onloadedmetadata = () => setDuracionVideo(Number.isFinite(v.duration) ? v.duration : null);
+    v.src = videoElegido.url;
+  }, [videoElegido]);
 
   const cargarHistorial = useCallback(async () => {
     const r = await fetch(`/api/publicaciones?productoId=${productoId}`, { cache: "no-store" });
@@ -86,7 +108,8 @@ export default function Publicador({
     return () => clearInterval(t);
   }, [hayProcesando, cargarHistorial]);
 
-  const hayRedes = Boolean(redes.instagram || redes.facebook);
+  const hayRedes = Boolean(redes.instagram || redes.facebook || redes.tiktok);
+  const conTikTok = destinos.includes("TIKTOK");
   const opciones = formato === "VIDEO" ? videos : fotos;
 
   function alternar(id: string) {
@@ -137,20 +160,28 @@ export default function Publicador({
     if (formato === "VIDEO" && seleccion.length !== 1) return "Elegí 1 video.";
     if (!texto.trim()) return "Falta el texto de la publicación.";
     if (texto.length > MAX_TEXTO) return `El texto supera los ${MAX_TEXTO} caracteres.`;
+    if (conTikTok) return problemaTikTok(opcionesTikTok, creadorTikTok, duracionVideo);
     return null;
   })();
 
   async function publicar() {
     if (problema) return;
     const donde = destinos.map((d) => NOMBRE_RED[d]).join(" y ");
-    if (!confirm(`¿Publicar ahora en ${donde}? La publicación queda visible para todos.`)) return;
+    if (!confirm(`¿Publicar ahora en ${donde}?`)) return;
 
     setError("");
     setPublicando(true);
     const r = await fetch("/api/publicaciones", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productoId, redes: destinos, formato, mediaIds: seleccion, texto }),
+      body: JSON.stringify({
+        productoId,
+        redes: destinos,
+        formato,
+        mediaIds: seleccion,
+        texto,
+        tiktok: conTikTok ? opcionesTikTok : undefined,
+      }),
     });
     const data = await r.json().catch(() => ({}));
     setPublicando(false);
@@ -268,7 +299,31 @@ export default function Publicador({
                 Facebook <span className="text-gray-400">{redes.facebook}</span>
               </label>
             )}
+            {redes.tiktok && (
+              <label
+                className={`flex items-center gap-2 text-sm ${formato !== "VIDEO" ? "opacity-50" : ""}`}
+                title={formato !== "VIDEO" ? "En TikTok solo se pueden publicar videos" : ""}
+              >
+                <input
+                  type="checkbox"
+                  disabled={formato !== "VIDEO"}
+                  checked={conTikTok}
+                  onChange={() => alternarRed("TIKTOK")}
+                />
+                TikTok <span className="text-gray-400">{redes.tiktok}</span>
+                {formato !== "VIDEO" && <span className="text-xs text-gray-400">(solo videos)</span>}
+              </label>
+            )}
           </div>
+
+          {conTikTok && (
+            <TikTokOpciones
+              opciones={opcionesTikTok}
+              onCambio={setOpcionesTikTok}
+              creador={creadorTikTok}
+              onCreador={setCreadorTikTok}
+            />
+          )}
 
           {/* Texto */}
           <div className="flex flex-col gap-2">
