@@ -6,6 +6,7 @@ import { maximoPorTipo } from "@/lib/media";
 import { buscarModeloGratis, cfConfigurado, generarFotoGratis } from "@/lib/cloudflare-ia";
 import {
   promptsFotos,
+  limpiarEstilos,
   limpiarTexto,
   type EscenaId,
   type FormatoId,
@@ -81,6 +82,7 @@ export async function POST(req: NextRequest) {
     extra?: string;
     texto?: string;
     textoPos?: TextoPosId;
+    estilos?: string[];
   };
   const { productoId } = body;
   if (!productoId) return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
@@ -114,6 +116,7 @@ export async function POST(req: NextRequest) {
     extra: body.extra,
     texto: limpiarTexto(body.texto),
     textoPos: body.textoPos === "abajo" ? "abajo" : "arriba",
+    estilos: limpiarEstilos(body.estilos),
   });
 
   const existentes = await prisma.mediaProducto.count({ where: { productoId, tipo: "FOTO" } });
