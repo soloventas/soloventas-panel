@@ -9,6 +9,7 @@ import {
   promptsFotos,
   limpiarEstilos,
   limpiarTexto,
+  fichaDe,
   type TextoPosId,
   type CalidadId,
   type FotoTipoId,
@@ -154,7 +155,12 @@ export async function POST(req: NextRequest) {
 
   const producto = await prisma.producto.findUnique({
     where: { id: productoId },
-    select: { id: true, nombre: true },
+    select: {
+      id: true,
+      nombre: true,
+      descripcion: true,
+      variantes: { select: { color: { select: { nombre: true } }, talle: { select: { nombre: true } } } },
+    },
   });
   if (!producto) return NextResponse.json({ error: "Producto no encontrado." }, { status: 404 });
 
@@ -216,6 +222,7 @@ export async function POST(req: NextRequest) {
   if (tipo === "FOTO") {
     const pack = promptsFotos(fotoTipo, {
       producto: producto.nombre,
+      ficha: fichaDe(producto),
       escena,
       escenaPersonalizada: body.escenaPersonalizada,
       persona,
@@ -228,7 +235,7 @@ export async function POST(req: NextRequest) {
     for (const p of pack) {
       pedidos.push({
         prompt: p.prompt,
-        input: modelo.armar({ prompt: p.prompt, urls, formato, duracion, conTexto }),
+        input: modelo.armar({ prompt: p.prompt, urls, formato, duracion, conTexto: conTexto || Boolean(p.conTexto) }),
       });
     }
   } else {
