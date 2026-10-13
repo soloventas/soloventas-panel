@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "./media-manager";
 import {
   ESCENAS,
+  ESTILOS,
+  MAX_ESTILOS,
+  type EstiloId,
   FOTO_TIPOS,
   FORMATOS,
   PERSONAS,
@@ -236,6 +239,8 @@ export default function EstudioIA({
   const [extra, setExtra] = useState("");
   const [texto, setTexto] = useState("");
   const [textoPos, setTextoPos] = useState<TextoPosId>("arriba");
+  // Estilos de publicidad marcados: sale una edición por cada uno.
+  const [estilos, setEstilos] = useState<EstiloId[]>(["publicidad"]);
   const [copiado, setCopiado] = useState<number | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState("");
@@ -272,6 +277,7 @@ export default function EstudioIA({
         extra,
         texto,
         textoPos,
+        estilos,
       });
     }
     return [
@@ -289,7 +295,7 @@ export default function EstudioIA({
         }),
       },
     ];
-  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra, texto, textoPos]);
+  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra, texto, textoPos, estilos]);
 
   const herramientas = herramientasPara(modo);
   const modelos = modelosPara(modo);
@@ -371,8 +377,8 @@ export default function EstudioIA({
     if (problema) return;
     const que =
       modo === "FOTO"
-        ? cantidadFotos === 2
-          ? "2 fotos (producto real + con modelo)"
+        ? cantidadFotos > 1
+          ? `${cantidadFotos} fotos (${prompts.map((p) => p.titulo.toLowerCase()).join(", ")})`
           : `1 foto (${herramientaFoto.nombre.toLowerCase()})`
         : `un video de ${duracion} segundos`;
     if (!confirm(`¿Generar ${que} con ${modelo.nombre}? Costo: ${costo}.`)) return;
@@ -396,6 +402,7 @@ export default function EstudioIA({
         extra,
         texto,
         textoPos,
+        estilos,
       }),
     });
     const data = await r.json().catch(() => ({}));
@@ -427,6 +434,7 @@ export default function EstudioIA({
           extra,
           texto,
           textoPos,
+          estilos,
         })
       );
       const refs = await Promise.all(seleccionadas.map((f) => achicarFoto(f.url)));
@@ -711,6 +719,44 @@ export default function EstudioIA({
           </div>
         </div>
 
+        {modo === "FOTO" && (fotoTipo === "pack" || fotoTipo === "escena") && (
+          <div>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">
+              Estilo de publicidad · marcá hasta {MAX_ESTILOS} y sale una foto por cada uno
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {ESTILOS.map((e) => {
+                const activo = estilos.includes(e.id);
+                return (
+                  <Chip
+                    key={e.id}
+                    activo={activo}
+                    onClick={() =>
+                      setEstilos((prev) =>
+                        activo
+                          ? prev.length > 1
+                            ? prev.filter((x) => x !== e.id)
+                            : prev
+                          : prev.length >= MAX_ESTILOS
+                          ? [...prev.slice(1), e.id]
+                          : [...prev, e.id]
+                      )
+                    }
+                  >
+                    {activo ? "✓ " : ""}
+                    {e.nombre}
+                  </Chip>
+                );
+              })}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {fotoTipo === "pack"
+                ? `Salen ${cantidadFotos} fotos: el producto real solo y una con modelo por cada estilo.`
+                : `Salen ${cantidadFotos} foto${cantidadFotos === 1 ? "" : "s"}, una por estilo.`}
+            </p>
+          </div>
+        )}
+
         <div>
           <p className="text-xs font-medium text-gray-700 mb-1.5">
             Texto escrito {modo === "FOTO" ? "sobre la foto" : "en el video"} (opcional)
@@ -865,6 +911,7 @@ export default function EstudioIA({
         etiquetaIA={eleccion.clase === "paga" ? costo : eleccion.clase === "panel" ? "Gratis en tu panel" : "Gratis"}
         gratis={eleccion.clase !== "paga"}
         videoConFotos={modo === "VIDEO" && eleccion.clase === "panel"}
+        estilos={ESTILOS.filter((e) => estilos.includes(e.id))}
       />
 
       {problema && <p className="text-sm text-amber-700">{problema}</p>}
@@ -887,7 +934,7 @@ export default function EstudioIA({
                   {enviando
                     ? "Generando..."
                     : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
-                        cantidadFotos === 2 ? "Generar 2 fotos gratis" : "Generar foto gratis"
+                        cantidadFotos > 1 ? `Generar ${cantidadFotos} fotos gratis` : "Generar foto gratis"
                       }`}
                 </button>
                 <span className="text-xs text-green-900">
@@ -988,12 +1035,12 @@ export default function EstudioIA({
             </li>
             <li>
               Copiá la instrucción de abajo y abrí {herramienta.nombre}. {pasos}
-              {cantidadFotos === 2 && " Para la segunda foto, pegá la instrucción 2."}
+              {cantidadFotos > 1 && " Para cada foto, pegá su instrucción (1, 2, 3...)."}
             </li>
             <li>
               Descargá el resultado y subilo arriba en <b>Fotos y videos</b>, tildando{" "}
               <i>&quot;Son fotos o videos generados con IA&quot;</i>.
-              {cantidadFotos === 2 && " Para publicarlas juntas elegí “Carrusel” en Publicar en redes."}
+              {cantidadFotos > 1 && " Para publicarlas juntas elegí “Carrusel” en Publicar en redes."}
             </li>
           </ol>
           {prompts.map((p, i) => (
@@ -1043,7 +1090,7 @@ export default function EstudioIA({
                 {enviando
                   ? "Enviando..."
                   : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
-                      modo === "FOTO" ? (cantidadFotos === 2 ? "Generar 2 fotos" : "Generar foto") : "Generar video"
+                      modo === "FOTO" ? (cantidadFotos > 1 ? `Generar ${cantidadFotos} fotos` : "Generar foto") : "Generar video"
                     }`}
               </button>
               <span className="text-xs text-violet-900">
