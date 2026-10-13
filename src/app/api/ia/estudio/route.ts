@@ -7,6 +7,7 @@ import { enviarAFal, estadoFal, falConfigurado, resultadoFal } from "@/lib/fal";
 import {
   promptVideo,
   promptsFotos,
+  limpiarEstilos,
   limpiarTexto,
   type TextoPosId,
   type CalidadId,
@@ -142,6 +143,7 @@ export async function POST(req: NextRequest) {
     extra?: string;
     texto?: string;
     textoPos?: TextoPosId;
+    estilos?: string[];
   };
 
   const { productoId, tipo } = body;
@@ -166,13 +168,22 @@ export async function POST(req: NextRequest) {
       ? body.fotoTipo
       : "pack";
   // El pack sale de a 2 fotos (producto real + con modelo).
-  const nuevos = tipo === "FOTO" && fotoTipo === "pack" ? 2 : 1;
+  // Pack: producto real + una foto con modelo por estilo; escena: una por estilo.
+  const cantidadEstilos = limpiarEstilos(body.estilos).length;
+  const nuevos =
+    tipo !== "FOTO"
+      ? 1
+      : fotoTipo === "pack"
+      ? 1 + cantidadEstilos
+      : fotoTipo === "escena"
+      ? cantidadEstilos
+      : 1;
   if (existentes + enCurso + nuevos > maximoPorTipo(tipo)) {
     return NextResponse.json(
       {
         error:
           tipo === "FOTO"
-            ? `No hay lugar para ${nuevos === 2 ? "2 fotos más" : "otra foto"} (máximo 20). Borrá alguna para generar más.`
+            ? `No hay lugar para ${nuevos > 1 ? `${nuevos} fotos más` : "otra foto"} (máximo 20). Borrá alguna para generar más.`
             : "Ya llegaste al máximo de 5 videos. Borrá alguno para generar más.",
       },
       { status: 400 }
@@ -212,6 +223,7 @@ export async function POST(req: NextRequest) {
       extra: body.extra,
       texto,
       textoPos,
+      estilos: limpiarEstilos(body.estilos),
     });
     for (const p of pack) {
       pedidos.push({
