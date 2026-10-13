@@ -163,7 +163,8 @@ export type EstiloId =
   | "editorial"
   | "flatlay"
   | "detalle"
-  | "dividida";
+  | "dividida"
+  | "ficha";
 
 export const ESTILOS: { id: EstiloId; nombre: string; en: string }[] = [
   {
@@ -216,6 +217,11 @@ export const ESTILOS: { id: EstiloId; nombre: string; en: string }[] = [
     nombre: "Producto + modelo (dividida)",
     en: "split-screen advertising layout: left half the product package in detail, right half a model using it",
   },
+  {
+    id: "ficha",
+    nombre: "Ficha con beneficios",
+    en: "infographic product ad sheet with headline, benefits, color options, sizes and the package in detail",
+  },
 ];
 
 export const MAX_ESTILOS = 3;
@@ -233,8 +239,36 @@ function estiloEn(id?: EstiloId) {
   );
 }
 
+// Datos del catálogo para la ficha publicitaria (no se inventa nada más).
+export type DatosFicha = { descripcion?: string | null; colores?: string[]; talles?: string[] };
+
+// "Del 34 al 45" si los talles son números; si no, la lista.
+export function rangoTalles(talles: string[] = []) {
+  const unicos = Array.from(new Set(talles.map((t) => t.trim()).filter(Boolean)));
+  if (!unicos.length) return "";
+  const nums = unicos.map(Number);
+  if (unicos.length > 2 && nums.every((n) => !isNaN(n))) {
+    return `Del ${Math.min(...nums)} al ${Math.max(...nums)}`;
+  }
+  return unicos.join(" · ");
+}
+
+// Arma los datos de la ficha con lo cargado en el catálogo.
+export function fichaDe(p: {
+  descripcion?: string | null;
+  variantes?: { color?: { nombre: string } | null; talle?: { nombre: string } | null }[];
+}): DatosFicha {
+  const v = p.variantes || [];
+  return {
+    descripcion: p.descripcion,
+    colores: Array.from(new Set(v.map((x) => x.color?.nombre || "").filter(Boolean))),
+    talles: Array.from(new Set(v.map((x) => x.talle?.nombre || "").filter(Boolean))),
+  };
+}
+
 type OpcionesFoto = {
   producto: string;
+  ficha?: DatosFicha;
   escena: EscenaId;
   escenaPersonalizada?: string;
   persona: PersonaId;
@@ -262,6 +296,34 @@ function promptDividida(opciones: OpcionesFoto, escena: string, formato: string)
     .join(" ");
 }
 
+// Ficha publicitaria tipo infografía: título, beneficios con íconos, colores,
+// talles y el producto en su envase bien detallado. Solo usa datos reales.
+function promptFicha(opciones: OpcionesFoto, formato: string) {
+  const f = opciones.ficha || {};
+  const descripcion = (f.descripcion || "").replace(/\s+/g, " ").trim().slice(0, 500);
+  const colores = Array.from(new Set((f.colores || []).filter(Boolean))).slice(0, 4);
+  const talles = rangoTalles(f.talles);
+  return [
+    "Create a professional Spanish-language infographic advertising sheet for an online store, in the style of a polished retail product flyer.",
+    FIDELIDAD,
+    `Product: ${opciones.producto}.`,
+    `Layout on a soft light background with a wooden surface at the bottom: on the RIGHT, large and sharply detailed, the product exactly as in the reference, including its package with all printed text, logos and labels fully legible. On the LEFT, a bold two-color headline with the product name "${opciones.producto}".`,
+    descripcion
+      ? `Below the headline, three short benefit rows, each with a round flat icon, a bold uppercase title and one short line, written in Spanish and based ONLY on this description: "${descripcion}". Do not invent features, materials, guarantees or claims that are not in it.`
+      : "Below the headline, leave clean space; do not invent features or claims.",
+    colores.length
+      ? `Under a small label "ELEGÍ LA TUYA", show the product side by side in these colors, each with its name in uppercase: ${colores.join(", ")}.`
+      : "",
+    talles ? `Show the size range prominently as "${talles}".` : "",
+    "At the bottom, a solid colored banner with a short Spanish call to action. Use a coherent brand color palette, modern bold sans-serif typography and correct Spanish spelling. No prices.",
+    `Compose it for ${formato}.`,
+    instruccionTexto(opciones),
+    opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function promptFoto(opciones: OpcionesFoto) {
   const escena = escenaEn(opciones.escena, opciones.escenaPersonalizada || "");
   const formato =
@@ -271,6 +333,7 @@ export function promptFoto(opciones: OpcionesFoto) {
       ? "a square 1:1 format"
       : "a vertical 4:5 feed format";
   if (opciones.estilo === "dividida") return promptDividida(opciones, escena, formato);
+  if (opciones.estilo === "ficha") return promptFicha(opciones, formato);
   return [
     "Create a professional, eye-catching social media advertising photo for an online store that makes people want to buy the product.",
     FIDELIDAD,
@@ -306,8 +369,9 @@ export function promptsPackFoto(opciones: OpcionesFoto, estilos: EstiloId[] = ["
       }),
     },
     ...estilos.map((estilo) => ({
-      titulo: `Con modelo · ${nombreEstilo(estilo)}`,
+      titulo: estilo === "ficha" ? nombreEstilo(estilo) : `Con modelo · ${nombreEstilo(estilo)}`,
       prompt: promptFoto({ ...opciones, persona, estilo }),
+      conTexto: estilo === "ficha",
     })),
   ];
 }
@@ -317,7 +381,7 @@ export function promptsPackFoto(opciones: OpcionesFoto, estilos: EstiloId[] = ["
 export function promptsFotos(
   tipo: FotoTipoId,
   opciones: OpcionesFoto & { estilos?: EstiloId[] }
-): { titulo: string; prompt: string }[] {
+): { titulo: string; prompt: string; conTexto?: boolean }[] {
   const estilos = limpiarEstilos(opciones.estilos);
   const extra = opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "";
   const textoPedido = instruccionTexto(opciones);
@@ -326,6 +390,7 @@ export function promptsFotos(
     return estilos.map((estilo) => ({
       titulo: `En el lugar · ${nombreEstilo(estilo)}`,
       prompt: promptFoto({ ...opciones, persona: "ninguna", estilo }),
+      conTexto: estilo === "ficha",
     }));
   }
   if (tipo === "catalogo") {
