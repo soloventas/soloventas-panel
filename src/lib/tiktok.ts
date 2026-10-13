@@ -173,6 +173,50 @@ export async function iniciarVideoTikTok(url: string, titulo: string, op: Opcion
   return init.publish_id as string;
 }
 
+// Publica fotos (una o carrusel) en TikTok. TikTok las descarga de una URL
+// que tiene que estar en el dominio verificado de la app, por eso se pasan las
+// direcciones del panel (/api/media/publica), no las de Vercel Blob.
+// Devuelve el publish_id.
+export async function iniciarFotosTikTok(urls: string[], texto: string, op: OpcionesTikTok) {
+  const token = await tokenTikTok();
+  const source_info = {
+    source: "PULL_FROM_URL",
+    photo_images: urls.slice(0, 35),
+    photo_cover_index: 0,
+  };
+  // El título de las fotos admite 90 caracteres: va la primera línea y el
+  // texto completo como descripción.
+  const titulo = (texto.split("\n").find((l) => l.trim()) || "").trim().slice(0, 90);
+  const descripcion = texto.slice(0, 4000);
+
+  if (op.modo === "BORRADOR") {
+    const d = await tiktokPost("/post/publish/content/init/", token, {
+      post_info: { title: titulo, description: descripcion },
+      source_info,
+      post_mode: "MEDIA_UPLOAD",
+      media_type: "PHOTO",
+    });
+    return d.publish_id as string;
+  }
+
+  if (!op.privacidad) throw new ErrorTikTok("Elegí quién puede ver la publicación en TikTok.");
+  const d = await tiktokPost("/post/publish/content/init/", token, {
+    post_info: {
+      title: titulo,
+      description: descripcion,
+      privacy_level: op.privacidad,
+      disable_comment: !op.permitirComentarios,
+      auto_add_music: true,
+      brand_organic_toggle: Boolean(op.contenidoComercial && op.marcaPropia),
+      brand_content_toggle: Boolean(op.contenidoComercial && op.contenidoPatrocinado),
+    },
+    source_info,
+    post_mode: "DIRECT_POST",
+    media_type: "PHOTO",
+  });
+  return d.publish_id as string;
+}
+
 // Consulta cómo va el video en TikTok.
 export async function estadoTikTok(publishId: string) {
   const token = await tokenTikTok();

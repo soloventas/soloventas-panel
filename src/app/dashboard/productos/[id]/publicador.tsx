@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "./media-manager";
 import TikTokOpciones, {
   OPCIONES_TIKTOK_INICIALES,
@@ -43,11 +43,14 @@ export default function Publicador({
   media,
   redes,
   iaActiva,
+  preseleccion,
 }: {
   productoId: string;
   media: Media[];
   redes: { instagram: string | null; facebook: string | null; tiktok: string | null };
   iaActiva: boolean;
+  // Archivos elegidos desde el Estudio IA para publicar.
+  preseleccion?: { ids: string[]; tipo: "FOTO" | "VIDEO"; clave: number } | null;
 }) {
   const fotos = useMemo(() => media.filter((m) => m.tipo === "FOTO"), [media]);
   const videos = useMemo(() => media.filter((m) => m.tipo === "VIDEO"), [media]);
@@ -71,14 +74,38 @@ export default function Publicador({
   const [creadorTikTok, setCreadorTikTok] = useState<Creador | null>(null);
   const [duracionVideo, setDuracionVideo] = useState<number | null>(null);
 
-  // Selección por defecto cada vez que cambia el formato o los archivos.
+  const caja = useRef<HTMLDivElement>(null);
+  const pendiente = useRef<string[] | null>(null);
+
+  // Selección por defecto cada vez que cambia el formato o los archivos
+  // (salvo que venga algo elegido desde el Estudio IA).
   useEffect(() => {
+    const disponibles = formato === "VIDEO" ? videos : fotos;
+    if (pendiente.current && pendiente.current.every((id) => disponibles.some((m) => m.id === id))) {
+      setSeleccion(pendiente.current);
+      pendiente.current = null;
+      return;
+    }
     if (formato === "FOTO") setSeleccion(fotos[0] ? [fotos[0].id] : []);
     if (formato === "CARRUSEL") setSeleccion(fotos.slice(0, MAX_CARRUSEL).map((f) => f.id));
     if (formato === "VIDEO") setSeleccion(videos[0] ? [videos[0].id] : []);
-    // TikTok solo acepta videos.
-    if (formato !== "VIDEO") setDestinos((prev) => prev.filter((r) => r !== "TIKTOK"));
   }, [formato, fotos, videos]);
+
+  // Llegó algo del Estudio IA: lo dejamos elegido y bajamos hasta acá.
+  useEffect(() => {
+    if (!preseleccion) return;
+    const nuevo: Formato =
+      preseleccion.tipo === "VIDEO" ? "VIDEO" : preseleccion.ids.length > 1 ? "CARRUSEL" : "FOTO";
+    const disponibles = nuevo === "VIDEO" ? videos : fotos;
+    if (nuevo === formato && preseleccion.ids.every((id) => disponibles.some((m) => m.id === id))) {
+      setSeleccion(preseleccion.ids);
+    } else {
+      pendiente.current = preseleccion.ids;
+      setFormato(nuevo);
+    }
+    caja.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preseleccion?.clave]);
 
   // Duración del video elegido, para avisar si TikTok no lo acepta.
   const videoElegido = formato === "VIDEO" ? videos.find((v) => v.id === seleccion[0]) : undefined;
@@ -107,6 +134,12 @@ export default function Publicador({
     const t = setInterval(cargarHistorial, 5000);
     return () => clearInterval(t);
   }, [hayProcesando, cargarHistorial]);
+
+  const elegidos = seleccion
+    .map((id) => media.find((m) => m.id === id))
+    .filter((m): m is Media => Boolean(m));
+  const [vistaIdx, setVistaIdx] = useState(0);
+  useEffect(() => setVistaIdx(0), [seleccion]);
 
   const hayRedes = Boolean(redes.instagram || redes.facebook || redes.tiktok);
   const conTikTok = destinos.includes("TIKTOK");
@@ -193,7 +226,7 @@ export default function Publicador({
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-5">
+    <div ref={caja} className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-5 scroll-mt-4">
       <p className="text-xs font-bold uppercase tracking-wide text-gold">Publicar en redes</p>
 
       {!hayRedes ? (
@@ -278,46 +311,58 @@ export default function Publicador({
           </div>
 
           {/* Redes */}
-          <div className="flex flex-wrap gap-4">
-            {redes.instagram && (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={destinos.includes("INSTAGRAM")}
-                  onChange={() => alternarRed("INSTAGRAM")}
-                />
-                Instagram <span className="text-gray-400">{redes.instagram}</span>
-              </label>
-            )}
-            {redes.facebook && (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={destinos.includes("FACEBOOK")}
-                  onChange={() => alternarRed("FACEBOOK")}
-                />
-                Facebook <span className="text-gray-400">{redes.facebook}</span>
-              </label>
-            )}
-            {redes.tiktok && (
-              <label
-                className={`flex items-center gap-2 text-sm ${formato !== "VIDEO" ? "opacity-50" : ""}`}
-                title={formato !== "VIDEO" ? "En TikTok solo se pueden publicar videos" : ""}
-              >
-                <input
-                  type="checkbox"
-                  disabled={formato !== "VIDEO"}
-                  checked={conTikTok}
-                  onChange={() => alternarRed("TIKTOK")}
-                />
-                TikTok <span className="text-gray-400">{redes.tiktok}</span>
-                {formato !== "VIDEO" && <span className="text-xs text-gray-400">(solo videos)</span>}
-              </label>
-            )}
+          <div>
+            <p className="text-sm font-medium mb-2">¿En qué redes lo subís?</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {(
+                [
+                  ["INSTAGRAM", redes.instagram],
+                  ["FACEBOOK", redes.facebook],
+                  ["TIKTOK", redes.tiktok],
+                ] as [Red, string | null][]
+              ).map(([red, cuenta]) => {
+                const activa = destinos.includes(red);
+                return (
+                  <button
+                    key={red}
+                    type="button"
+                    disabled={!cuenta}
+                    onClick={() => alternarRed(red)}
+                    className={`text-left rounded-lg border-2 px-3 py-2 transition ${
+                      activa ? "border-navy bg-navy/5" : "border-gray-200 hover:border-gray-400"
+                    } disabled:opacity-50 disabled:hover:border-gray-200`}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-gray-900">{NOMBRE_RED[red]}</span>
+                      <span
+                        className={`w-5 h-5 rounded border flex items-center justify-center text-xs ${
+                          activa ? "bg-navy border-navy text-white" : "border-gray-300"
+                        }`}
+                      >
+                        {activa ? "✓" : ""}
+                      </span>
+                    </span>
+                    <span className="block text-xs text-gray-500 truncate">
+                      {cuenta || "Sin conectar"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {!redes.tiktok || !redes.instagram || !redes.facebook ? (
+              <p className="text-xs text-gray-400 mt-1.5">
+                Las redes sin conectar se conectan en{" "}
+                <a href="/dashboard/redes" className="underline">
+                  Redes sociales
+                </a>
+                .
+              </p>
+            ) : null}
           </div>
 
           {conTikTok && (
             <TikTokOpciones
+              esVideo={formato === "VIDEO"}
               opciones={opcionesTikTok}
               onCambio={setOpcionesTikTok}
               creador={creadorTikTok}
@@ -366,6 +411,48 @@ export default function Publicador({
               {texto.length}/{MAX_TEXTO}
             </p>
           </div>
+
+          {/* Vista previa */}
+          {elegidos.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 flex flex-col gap-2">
+              <p className="text-xs font-semibold text-gray-700">
+                Vista previa{destinos.length > 0 ? ` · ${destinos.map((d) => NOMBRE_RED[d]).join(", ")}` : ""}
+              </p>
+              <div className="bg-white rounded-md border border-gray-200 overflow-hidden max-w-sm w-full mx-auto">
+                {elegidos[vistaIdx]?.tipo === "VIDEO" ? (
+                  <video
+                    src={elegidos[vistaIdx].url}
+                    controls
+                    playsInline
+                    className="w-full max-h-[28rem] bg-black"
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={elegidos[vistaIdx]?.url}
+                    alt=""
+                    className="w-full max-h-[28rem] object-contain bg-gray-100"
+                  />
+                )}
+                {elegidos.length > 1 && (
+                  <div className="flex justify-center gap-1.5 py-2">
+                    {elegidos.map((m, i) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setVistaIdx(i)}
+                        aria-label={`Ver ${i + 1}`}
+                        className={`w-2 h-2 rounded-full ${i === vistaIdx ? "bg-navy" : "bg-gray-300"}`}
+                      />
+                    ))}
+                  </div>
+                )}
+                <p className="px-3 py-2 text-xs text-gray-700 whitespace-pre-line line-clamp-6">
+                  {texto || <span className="text-gray-400">Acá va a aparecer el texto.</span>}
+                </p>
+              </div>
+            </div>
+          )}
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 

@@ -99,7 +99,17 @@ export async function GET(req: NextRequest) {
     take: 20,
     select: { id: true, tipo: true, estado: true, error: true, createdAt: true, mediaId: true },
   });
-  return NextResponse.json(trabajos);
+  // Sumamos la foto/video resultante para mostrar la vista previa.
+  const ids = trabajos.map((t) => t.mediaId).filter((id): id is string => Boolean(id));
+  const medias = ids.length
+    ? await prisma.mediaProducto.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, url: true, tipo: true, aprobado: true },
+      })
+    : [];
+  return NextResponse.json(
+    trabajos.map((t) => ({ ...t, media: medias.find((m) => m.id === t.mediaId) ?? null }))
+  );
 }
 
 // Pide a la IA una foto o un video nuevo (modo automático).

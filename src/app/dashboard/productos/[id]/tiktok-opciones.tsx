@@ -62,7 +62,7 @@ export function problemaTikTok(
     return `TikTok permite videos de hasta ${creador.duracionMaxima} segundos en tu cuenta.`;
   }
   if (op.modo === "BORRADOR") return null;
-  if (!op.privacidad) return "Elegí quién puede ver el video en TikTok.";
+  if (!op.privacidad) return "Elegí quién puede ver la publicación en TikTok.";
   if (op.contenidoComercial && !op.marcaPropia && !op.contenidoPatrocinado) {
     return "Indicá si el contenido comercial promociona tu marca o a un tercero.";
   }
@@ -74,7 +74,9 @@ export default function TikTokOpciones({
   onCambio,
   creador,
   onCreador,
+  esVideo = true,
 }: {
+  esVideo?: boolean;
   opciones: OpcionesTikTok;
   onCambio: (o: OpcionesTikTok) => void;
   creador: Creador | null;
@@ -135,7 +137,7 @@ export default function TikTokOpciones({
         <>
           <div>
             <label className="block text-sm font-medium mb-1" htmlFor="tiktok-privacidad">
-              ¿Quién puede ver este video?
+              ¿Quién puede ver {esVideo ? "este video" : "estas fotos"}?
             </label>
             <select
               id="tiktok-privacidad"
@@ -171,6 +173,7 @@ export default function TikTokOpciones({
                 />
                 Comenten
               </label>
+              {esVideo && (
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -180,6 +183,8 @@ export default function TikTokOpciones({
                 />
                 Hagan Dúo
               </label>
+              )}
+              {esVideo && (
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -189,6 +194,7 @@ export default function TikTokOpciones({
                 />
                 Hagan Stitch
               </label>
+              )}
             </div>
           </div>
 
@@ -205,7 +211,7 @@ export default function TikTokOpciones({
                   })
                 }
               />
-              Este video promociona una marca, un producto o un servicio
+              {esVideo ? "Este video" : "Esta publicación"} promociona una marca, un producto o un servicio
             </label>
             {opciones.contenidoComercial && (
               <div className="pl-6 flex flex-col gap-1">
@@ -235,7 +241,7 @@ export default function TikTokOpciones({
                 </label>
                 {(opciones.marcaPropia || opciones.contenidoPatrocinado) && (
                   <p className="text-xs text-gray-500">
-                    TikTok va a mostrar el video con la etiqueta{" "}
+                    TikTok va a mostrar la publicación con la etiqueta{" "}
                     <b>
                       {opciones.contenidoPatrocinado ? "\"Colaboración pagada\"" : "\"Contenido promocional\""}
                     </b>
@@ -271,7 +277,7 @@ export default function TikTokOpciones({
         >
           Confirmación de uso de música
         </a>{" "}
-        de TikTok. Después de publicar, TikTok puede tardar unos minutos en procesar el video.
+        de TikTok. Después de publicar, TikTok puede tardar unos minutos en procesarla.{!esVideo && " A las fotos TikTok les agrega música automáticamente."}
       </p>
     </div>
   );

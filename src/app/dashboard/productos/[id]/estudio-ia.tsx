@@ -32,6 +32,7 @@ type Trabajo = {
   estado: "PENDIENTE" | "LISTO" | "ERROR";
   error: string | null;
   createdAt: string;
+  media: { id: string; url: string; tipo: Modo; aprobado: boolean } | null;
 };
 
 // Qué se puede hacer: cada tarea define si es foto o video y qué variante.
@@ -175,12 +176,15 @@ export default function EstudioIA({
   fotos,
   falActivo,
   onNuevos,
+  onPublicar,
 }: {
   productoId: string;
   producto: string;
   fotos: Media[];
   falActivo: boolean;
-  onNuevos: () => void;
+  onNuevos: () => void | Promise<void>;
+  // Lleva lo elegido al publicador (ya aprobado) para elegir redes y publicar.
+  onPublicar?: (ids: string[], tipo: Modo) => void;
 }) {
   const [tareaId, setTareaId] = useState(TAREAS[0].id);
   const [seleccion, setSeleccion] = useState<string[]>([]);
@@ -347,6 +351,60 @@ export default function EstudioIA({
     }
     await cargarTrabajos();
   }
+
+  const [ocupado, setOcupado] = useState<string | null>(null);
+
+  // Aprueba lo que hizo la IA y lo lleva a "Publicar en redes".
+  async function usarResultados(lista: NonNullable<Trabajo["media"]>[]) {
+    setError("");
+    setOcupado(lista[0].id);
+    for (const m of lista) {
+      if (m.aprobado) continue;
+      const r = await fetch(`/api/productos/${productoId}/media/${m.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion: "aprobar" }),
+      });
+      if (!r.ok) {
+        setOcupado(null);
+        setError("No se pudo aprobar. Probá de nuevo.");
+        return;
+      }
+    }
+    await cargarTrabajos();
+    await onNuevos();
+    setOcupado(null);
+    onPublicar?.(
+      lista.map((m) => m.id),
+      lista[0].tipo
+    );
+  }
+
+  async function descartar(m: NonNullable<Trabajo["media"]>) {
+    if (!confirm("¿Descartar este resultado? Se borra del producto.")) return;
+    setOcupado(m.id);
+    await fetch(`/api/productos/${productoId}/media/${m.id}`, { method: "DELETE" });
+    await cargarTrabajos();
+    onNuevos();
+    setOcupado(null);
+  }
+
+  // Resultados listos, con las fotos que salieron juntas (pack) agrupadas.
+  const resultados = trabajos.filter((t) => t.estado === "LISTO" && t.media);
+  const grupos: NonNullable<Trabajo["media"]>[][] = [];
+  for (const t of resultados) {
+    const ultimo = grupos[grupos.length - 1];
+    const previo = ultimo && resultados.find((r) => r.media?.id === ultimo[0].id);
+    const juntos =
+      previo &&
+      t.tipo === "FOTO" &&
+      previo.tipo === "FOTO" &&
+      ultimo.length < 2 &&
+      Math.abs(new Date(previo.createdAt).getTime() - new Date(t.createdAt).getTime()) < 15000;
+    if (juntos) ultimo.push(t.media!);
+    else grupos.push([t.media!]);
+  }
+  const otrosTrabajos = trabajos.filter((t) => !(t.estado === "LISTO" && t.media));
 
   const seleccionadas = seleccion
     .map((id) => fotos.find((f) => f.id === id))
@@ -662,11 +720,78 @@ export default function EstudioIA({
         </div>
       )}
 
-      {trabajos.length > 0 && (
+      {grupos.length > 0 && (
+        <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
+          <div>
+            <p className="text-sm font-semibold text-navy">Así quedó · resultados de la IA</p>
+            <p className="text-xs text-gray-500">
+              Mirá cómo quedó. Si te gusta, tocá <b>Publicar</b> y elegís en qué redes subirlo.
+            </p>
+          </div>
+          {grupos.map((g) => (
+            <div key={g[0].id} className="rounded-lg border border-gray-200 p-3 flex flex-col gap-3">
+              <div className={`grid gap-2 ${g.length > 1 ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2"}`}>
+                {g.map((m) => (
+                  <a key={m.id} href={m.url} target="_blank" rel="noreferrer" className="block">
+                    {m.tipo === "FOTO" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={m.url} alt="" className="w-full rounded-md object-contain bg-gray-50 max-h-96" />
+                    ) : (
+                      <video src={m.url} controls playsInline className="w-full rounded-md bg-black max-h-96" />
+                    )}
+                  </a>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => usarResultados(g)}
+                  disabled={ocupado !== null}
+                  className="rounded-md bg-navy text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                >
+                  {ocupado === g[0].id
+                    ? "Preparando..."
+                    : g.length > 1
+                    ? "Publicar las 2 (carrusel)"
+                    : "Publicar"}
+                </button>
+                {g.length > 1 &&
+                  g.map((m, i) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => usarResultados([m])}
+                      disabled={ocupado !== null}
+                      className="rounded-md border border-navy text-navy text-xs font-semibold px-3 py-1.5 hover:bg-navy/5 disabled:opacity-50"
+                    >
+                      Solo la {i + 1}
+                    </button>
+                  ))}
+                {g.map((m, i) => (
+                  <button
+                    key={`d-${m.id}`}
+                    type="button"
+                    onClick={() => descartar(m)}
+                    disabled={ocupado !== null}
+                    className="text-xs text-red-600 underline disabled:opacity-50"
+                  >
+                    Descartar{g.length > 1 ? ` la ${i + 1}` : ""}
+                  </button>
+                ))}
+                {g.every((m) => m.aprobado) && (
+                  <span className="text-xs text-green-700">✓ Aprobada</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {otrosTrabajos.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <p className="text-xs font-semibold text-gray-700">Lo que le pediste a la IA</p>
+          <p className="text-xs font-semibold text-gray-700">Pedidos a la IA</p>
           <ul className="flex flex-col gap-1.5">
-            {trabajos.map((t) => (
+            {otrosTrabajos.map((t) => (
               <li key={t.id} className="text-sm flex flex-wrap items-center gap-x-3">
                 <span className="font-medium">{t.tipo === "FOTO" ? "Foto" : "Video"}</span>
                 <span className="text-xs text-gray-500">
@@ -679,9 +804,7 @@ export default function EstudioIA({
                   <span className="text-xs font-semibold text-amber-600">Generando...</span>
                 )}
                 {t.estado === "LISTO" && (
-                  <span className="text-xs font-semibold text-green-700">
-                    Listo · revisalo arriba y aprobalo
-                  </span>
+                  <span className="text-xs text-gray-500">Listo (el archivo ya no está)</span>
                 )}
                 {t.estado === "ERROR" && (
                   <span className="text-xs text-red-600">No se pudo: {t.error}</span>

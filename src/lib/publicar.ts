@@ -7,7 +7,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { graphGet, graphPost, obtenerIntegracion, ErrorMeta } from "@/lib/meta";
-import { estadoTikTok, iniciarVideoTikTok, type OpcionesTikTok } from "@/lib/tiktok";
+import { estadoTikTok, iniciarFotosTikTok, iniciarVideoTikTok, type OpcionesTikTok } from "@/lib/tiktok";
 
 export type FormatoPub = "FOTO" | "CARRUSEL" | "VIDEO";
 export type RedPub = "INSTAGRAM" | "FACEBOOK" | "TIKTOK";
@@ -153,7 +153,7 @@ export async function avanzarTikTok(publicacionId: string) {
     if (r.estado === "FAILED") {
       return prisma.publicacion.update({
         where: { id: pub.id },
-        data: { estado: "ERROR", error: r.motivo || "TikTok no pudo procesar el video." },
+        data: { estado: "ERROR", error: r.motivo || "TikTok no pudo procesar la publicación." },
       });
     }
 
@@ -241,8 +241,10 @@ export async function crearPublicacion(opciones: {
   urls: string[];
   texto: string;
   tiktok?: OpcionesTikTok;
+  // Dirección del panel, para que TikTok descargue las fotos desde el dominio verificado.
+  origen?: string;
 }) {
-  const { productoId, red, formato, urls, texto, tiktok } = opciones;
+  const { productoId, red, formato, urls, texto, tiktok, origen } = opciones;
 
   const pub = await prisma.publicacion.create({
     data: { productoId, red, formato, texto, mediaUrls: urls, estado: "PROCESANDO" },
@@ -250,9 +252,15 @@ export async function crearPublicacion(opciones: {
 
   try {
     if (red === "TIKTOK") {
-      if (formato !== "VIDEO") throw new Error("En TikTok solo se pueden publicar videos.");
       if (!tiktok) throw new Error("Faltan las opciones de TikTok.");
-      const contenedor = await iniciarVideoTikTok(urls[0], texto, tiktok);
+      let contenedor: string;
+      if (formato === "VIDEO") {
+        contenedor = await iniciarVideoTikTok(urls[0], texto, tiktok);
+      } else {
+        if (!origen) throw new Error("No se pudo armar el enlace de las fotos para TikTok.");
+        const publicas = urls.map((u) => `${origen}/api/media/publica?u=${encodeURIComponent(u)}`);
+        contenedor = await iniciarFotosTikTok(publicas, texto, tiktok);
+      }
       await prisma.publicacion.update({ where: { id: pub.id }, data: { contenedor } });
       return avanzarTikTok(pub.id);
     }

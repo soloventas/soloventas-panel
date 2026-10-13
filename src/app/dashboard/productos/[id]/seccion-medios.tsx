@@ -25,6 +25,12 @@ export default function SeccionMedios({
   const [base, setBase] = useState<Media[]>(inicial);
   const [version, setVersion] = useState(0);
   const [media, setMedia] = useState<Media[]>(inicial);
+  // Lo que se eligió en el Estudio IA para publicar (clave cambia en cada pedido).
+  const [preseleccion, setPreseleccion] = useState<{
+    ids: string[];
+    tipo: "FOTO" | "VIDEO";
+    clave: number;
+  } | null>(null);
 
   // Vuelve a leer las fotos/videos (por ejemplo, cuando la IA termina algo).
   const recargar = useCallback(async () => {
@@ -48,8 +54,15 @@ export default function SeccionMedios({
         fotos={fotosBase}
         falActivo={falActivo}
         onNuevos={recargar}
+        onPublicar={(ids, tipo) => setPreseleccion({ ids, tipo, clave: Date.now() })}
       />
-      <Publicador productoId={productoId} media={aprobados} redes={redes} iaActiva={iaActiva} />
+      <Publicador
+        productoId={productoId}
+        media={aprobados}
+        redes={redes}
+        iaActiva={iaActiva}
+        preseleccion={preseleccion}
+      />
     </div>
   );
 }

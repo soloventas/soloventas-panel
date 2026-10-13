@@ -76,14 +76,11 @@ export async function POST(req: NextRequest) {
     );
   }
   if (redesValidas.includes("TIKTOK")) {
-    if (formato !== "VIDEO") {
-      return NextResponse.json({ error: "En TikTok solo se pueden publicar videos." }, { status: 400 });
-    }
     if (tiktok?.modo !== "DIRECTO" && tiktok?.modo !== "BORRADOR") {
-      return NextResponse.json({ error: "Elegí cómo mandar el video a TikTok." }, { status: 400 });
+      return NextResponse.json({ error: "Elegí cómo mandar la publicación a TikTok." }, { status: 400 });
     }
     if (tiktok.modo === "DIRECTO" && !tiktok.privacidad) {
-      return NextResponse.json({ error: "Elegí quién puede ver el video en TikTok." }, { status: 400 });
+      return NextResponse.json({ error: "Elegí quién puede ver la publicación en TikTok." }, { status: 400 });
     }
     if (tiktok.contenidoComercial && !tiktok.marcaPropia && !tiktok.contenidoPatrocinado) {
       return NextResponse.json(
@@ -128,7 +125,15 @@ export async function POST(req: NextRequest) {
   const resultados = [];
   for (const red of redesValidas) {
     resultados.push(
-      await crearPublicacion({ productoId, red, formato, urls, texto: textoFinal, tiktok })
+      await crearPublicacion({
+        productoId,
+        red,
+        formato,
+        urls,
+        texto: textoFinal,
+        tiktok,
+        origen: req.nextUrl.origin,
+      })
     );
   }
   return NextResponse.json(resultados, { status: 201 });
