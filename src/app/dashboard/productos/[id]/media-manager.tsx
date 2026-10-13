@@ -73,10 +73,13 @@ export default function MediaManager({
   productoId,
   inicial,
   onCambio,
+  conIA = true,
 }: {
   productoId: string;
   inicial: Media[];
   onCambio?: (media: Media[]) => void;
+  // En el Catálogo se cargan solo fotos reales: sin la opción de IA.
+  conIA?: boolean;
 }) {
   const [media, setMedia] = useState<Media[]>(inicial);
 
@@ -280,7 +283,7 @@ export default function MediaManager({
         <p className="text-xs text-gray-400 mt-2">
           Fotos JPG, PNG o WEBP hasta 15 MB · Videos MP4, MOV o WEBM hasta 100 MB
         </p>
-        {!lleno && (
+        {!lleno && conIA && (
           <label className="mt-3 inline-flex items-center gap-2 text-xs text-gray-700">
             <input type="checkbox" checked={esIA} onChange={(e) => setEsIA(e.target.checked)} />
             Son fotos o videos generados con IA (quedan pendientes hasta que los apruebes)
