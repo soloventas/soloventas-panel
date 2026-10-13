@@ -29,12 +29,13 @@ export default async function EditarProductoPage({
   });
 
   const cuentas = await prisma.integracionRed.findMany({
-    where: { clave: { in: ["instagram", "facebook"] } },
+    where: { clave: { in: ["instagram", "facebook", "tiktok"] } },
     select: { clave: true, nombre: true },
   });
   const redes = {
     instagram: cuentas.find((c) => c.clave === "instagram")?.nombre ?? null,
     facebook: cuentas.find((c) => c.clave === "facebook")?.nombre ?? null,
+    tiktok: cuentas.find((c) => c.clave === "tiktok")?.nombre ?? null,
   };
 
   return (

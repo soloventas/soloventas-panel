@@ -10,6 +10,8 @@ const GUIA_POR_RED: Record<string, string> = {
     "Instagram: primera línea con gancho que frene el scroll, párrafos cortos, beneficios claros, CTA a escribir por mensaje directo o entrar a www.soloventas.com.ar, y al final entre 5 y 10 hashtags relevantes (en español, sin abusar). Máximo 1.800 caracteres.",
   FACEBOOK:
     "Facebook: foco en la oferta, los beneficios, la información útil y la confianza. CTA claro (escribinos por mensaje o entrá a www.soloventas.com.ar). Como mucho 3 hashtags. Máximo 1.500 caracteres.",
+  TIKTOK:
+    "TikTok: texto corto y directo, primera línea con gancho, tono cercano, CTA a escribir por mensaje o entrar a www.soloventas.com.ar, y entre 3 y 5 hashtags relevantes. Máximo 300 caracteres.",
   AMBAS:
     "Un solo texto que funcione bien en Instagram y en Facebook: gancho fuerte, párrafos cortos, beneficios, CTA a mensaje directo o www.soloventas.com.ar, y al final entre 5 y 8 hashtags relevantes. Máximo 1.800 caracteres.",
 };

@@ -1,4 +1,4 @@
-// Publica en Instagram y Facebook usando la página conectada.
+// Publica en Instagram y Facebook usando la página conectada, y videos en TikTok.
 //
 // Instagram trabaja en dos pasos: primero se crea un "contenedor" con la foto
 // o el video (Meta lo descarga y procesa), y cuando está listo se publica.
@@ -7,9 +7,10 @@
 
 import { prisma } from "@/lib/prisma";
 import { graphGet, graphPost, obtenerIntegracion, ErrorMeta } from "@/lib/meta";
+import { estadoTikTok, iniciarVideoTikTok, type OpcionesTikTok } from "@/lib/tiktok";
 
 export type FormatoPub = "FOTO" | "CARRUSEL" | "VIDEO";
-export type RedPub = "INSTAGRAM" | "FACEBOOK";
+export type RedPub = "INSTAGRAM" | "FACEBOOK" | "TIKTOK";
 
 export const MAX_CARRUSEL = 10;
 export const MAX_TEXTO_INSTAGRAM = 2200;
@@ -137,6 +138,54 @@ export async function avanzarInstagram(publicacionId: string) {
   }
 }
 
+// ------------------------------------------------------------------- TikTok
+
+// Revisa si TikTok ya terminó de procesar el video.
+export async function avanzarTikTok(publicacionId: string) {
+  const pub = await prisma.publicacion.findUnique({ where: { id: publicacionId } });
+  if (!pub || pub.red !== "TIKTOK" || pub.estado !== "PROCESANDO" || !pub.contenedor) {
+    return pub;
+  }
+
+  try {
+    const r = await estadoTikTok(pub.contenedor);
+
+    if (r.estado === "FAILED") {
+      return prisma.publicacion.update({
+        where: { id: pub.id },
+        data: { estado: "ERROR", error: r.motivo || "TikTok no pudo procesar el video." },
+      });
+    }
+
+    // Borrador: ya está en la bandeja de TikTok para terminarlo desde la app.
+    if (r.estado === "SEND_TO_USER_INBOX") {
+      return prisma.publicacion.update({
+        where: { id: pub.id },
+        data: { estado: "PUBLICADA", publicadaAt: new Date() },
+      });
+    }
+
+    if (r.estado === "PUBLISH_COMPLETE") {
+      return prisma.publicacion.update({
+        where: { id: pub.id },
+        data: {
+          estado: "PUBLICADA",
+          externalId: r.idPublicado,
+          permalink: r.idPublicado ? `https://www.tiktok.com/video/${r.idPublicado}` : null,
+          publicadaAt: new Date(),
+        },
+      });
+    }
+
+    return pub; // PROCESSING_UPLOAD / PROCESSING_DOWNLOAD
+  } catch (e) {
+    return prisma.publicacion.update({
+      where: { id: pub.id },
+      data: { estado: "ERROR", error: mensajeError(e) },
+    });
+  }
+}
+
 // ----------------------------------------------------------------- Facebook
 
 async function publicarFacebook(
@@ -191,14 +240,23 @@ export async function crearPublicacion(opciones: {
   formato: FormatoPub;
   urls: string[];
   texto: string;
+  tiktok?: OpcionesTikTok;
 }) {
-  const { productoId, red, formato, urls, texto } = opciones;
+  const { productoId, red, formato, urls, texto, tiktok } = opciones;
 
   const pub = await prisma.publicacion.create({
     data: { productoId, red, formato, texto, mediaUrls: urls, estado: "PROCESANDO" },
   });
 
   try {
+    if (red === "TIKTOK") {
+      if (formato !== "VIDEO") throw new Error("En TikTok solo se pueden publicar videos.");
+      if (!tiktok) throw new Error("Faltan las opciones de TikTok.");
+      const contenedor = await iniciarVideoTikTok(urls[0], texto, tiktok);
+      await prisma.publicacion.update({ where: { id: pub.id }, data: { contenedor } });
+      return avanzarTikTok(pub.id);
+    }
+
     if (red === "INSTAGRAM") {
       const ig = await obtenerIntegracion("instagram");
       if (!ig?.externalId) throw new Error("Instagram no está conectado.");

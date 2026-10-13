@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
+import type { OpcionesTikTok } from "@/lib/tiktok";
 import {
   avanzarInstagram,
+  avanzarTikTok,
   crearPublicacion,
   MAX_CARRUSEL,
   MAX_TEXTO_INSTAGRAM,
@@ -22,10 +24,13 @@ export async function GET(req: NextRequest) {
   if (!productoId) return NextResponse.json({ error: "Falta el producto." }, { status: 400 });
 
   const pendientes = await prisma.publicacion.findMany({
-    where: { productoId, estado: "PROCESANDO", red: "INSTAGRAM" },
-    select: { id: true },
+    where: { productoId, estado: "PROCESANDO", red: { in: ["INSTAGRAM", "TIKTOK"] } },
+    select: { id: true, red: true },
   });
-  for (const p of pendientes) await avanzarInstagram(p.id);
+  for (const p of pendientes) {
+    if (p.red === "TIKTOK") await avanzarTikTok(p.id);
+    else await avanzarInstagram(p.id);
+  }
 
   const publicaciones = await prisma.publicacion.findMany({
     where: { productoId },
@@ -40,15 +45,20 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
-  const { productoId, redes, formato, mediaIds, texto } = (await req.json().catch(() => ({}))) as {
+  const { productoId, redes, formato, mediaIds, texto, tiktok } = (await req
+    .json()
+    .catch(() => ({}))) as {
     productoId?: string;
     redes?: RedPub[];
     formato?: FormatoPub;
     mediaIds?: string[];
     texto?: string;
+    tiktok?: OpcionesTikTok;
   };
 
-  const redesValidas = (redes || []).filter((r) => r === "INSTAGRAM" || r === "FACEBOOK");
+  const redesValidas = (redes || []).filter(
+    (r) => r === "INSTAGRAM" || r === "FACEBOOK" || r === "TIKTOK"
+  );
   if (!productoId || redesValidas.length === 0) {
     return NextResponse.json({ error: "Elegí al menos una red." }, { status: 400 });
   }
@@ -64,6 +74,29 @@ export async function POST(req: NextRequest) {
       { error: `Instagram admite hasta ${MAX_TEXTO_INSTAGRAM} caracteres de texto.` },
       { status: 400 }
     );
+  }
+  if (redesValidas.includes("TIKTOK")) {
+    if (formato !== "VIDEO") {
+      return NextResponse.json({ error: "En TikTok solo se pueden publicar videos." }, { status: 400 });
+    }
+    if (tiktok?.modo !== "DIRECTO" && tiktok?.modo !== "BORRADOR") {
+      return NextResponse.json({ error: "Elegí cómo mandar el video a TikTok." }, { status: 400 });
+    }
+    if (tiktok.modo === "DIRECTO" && !tiktok.privacidad) {
+      return NextResponse.json({ error: "Elegí quién puede ver el video en TikTok." }, { status: 400 });
+    }
+    if (tiktok.contenidoComercial && !tiktok.marcaPropia && !tiktok.contenidoPatrocinado) {
+      return NextResponse.json(
+        { error: "Indicá si el contenido comercial promociona tu marca o a un tercero." },
+        { status: 400 }
+      );
+    }
+    if (tiktok.contenidoPatrocinado && tiktok.privacidad === "SELF_ONLY") {
+      return NextResponse.json(
+        { error: "El contenido patrocinado no puede ser privado en TikTok." },
+        { status: 400 }
+      );
+    }
   }
 
   // Tomamos los archivos en el orden elegido y verificamos que sean del producto.
@@ -95,7 +128,7 @@ export async function POST(req: NextRequest) {
   const resultados = [];
   for (const red of redesValidas) {
     resultados.push(
-      await crearPublicacion({ productoId, red, formato, urls, texto: textoFinal })
+      await crearPublicacion({ productoId, red, formato, urls, texto: textoFinal, tiktok })
     );
   }
   return NextResponse.json(resultados, { status: 201 });
