@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(trabajo, { status: 201 });
   }
 
-  if (!cfConfigurado()) {
+  if (!(await cfConfigurado())) {
     return NextResponse.json(
       { error: "Falta conectar la IA gratis (Cloudflare) en Vercel." },
       { status: 400 }
