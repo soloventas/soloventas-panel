@@ -17,6 +17,7 @@ import {
   type FormatoId,
   type PersonaId,
   type VideoTipoId,
+  type AccionUgcId,
 } from "@/lib/estudio";
 import { buscarModelo } from "@/lib/proveedores-ia";
 
@@ -140,6 +141,8 @@ export async function POST(req: NextRequest) {
     persona?: PersonaId;
     formato?: FormatoId;
     videoTipo?: VideoTipoId;
+    accion?: AccionUgcId;
+    detalle?: string;
     duracion?: number;
     extra?: string;
     texto?: string;
@@ -249,6 +252,8 @@ export async function POST(req: NextRequest) {
     const prompt = promptVideo({
       producto: producto.nombre,
       tipo: videoTipo,
+      accion: body.accion,
+      detalle: body.detalle,
       escena,
       escenaPersonalizada: body.escenaPersonalizada,
       persona,
