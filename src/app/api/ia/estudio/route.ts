@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
   const productoId = req.nextUrl.searchParams.get("productoId");
   if (!productoId) return NextResponse.json({ error: "Falta el producto." }, { status: 400 });
 
-  if (falConfigurado()) await avanzarTrabajos(productoId);
+  if (await falConfigurado()) await avanzarTrabajos(productoId);
 
   const trabajos = await prisma.trabajoIA.findMany({
     where: { productoId },
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
-  if (!falConfigurado()) {
+  if (!(await falConfigurado())) {
     return NextResponse.json(
       { error: "El modo automático necesita la clave FAL_KEY en Vercel. Mientras tanto usá el modo gratis." },
       { status: 400 }
