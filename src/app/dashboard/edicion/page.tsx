@@ -4,6 +4,7 @@ import { iaConfigurada } from "@/lib/ia";
 import { falConfigurado } from "@/lib/fal";
 import { cfConfigurado } from "@/lib/cloudflare-ia";
 import SeccionMedios from "../productos/[id]/seccion-medios";
+import ConectarIAs from "./conectar-ias";
 
 // Edición de foto y video: elegís un producto del catálogo y desde acá
 // mejorás sus fotos, armás videos con IA (gratis o paga) y lo publicás.
@@ -13,6 +14,7 @@ export default async function EdicionPage({
   searchParams: { producto?: string; buscar?: string };
 }) {
   const buscar = searchParams.buscar?.trim() || "";
+  const [cfActivo, falActivo] = await Promise.all([cfConfigurado(), falConfigurado()]);
   const productos = await prisma.producto.findMany({
     where: buscar
       ? {
@@ -80,8 +82,8 @@ export default async function EdicionPage({
           inicial={media}
           redes={redes}
           iaActiva={iaConfigurada()}
-          falActivo={falConfigurado()}
-          cfActivo={cfConfigurado()}
+          falActivo={falActivo}
+          cfActivo={cfActivo}
         />
       </div>
     );
@@ -95,10 +97,12 @@ export default async function EdicionPage({
       <div>
         <h1 className="text-2xl font-semibold text-navy">Edición de foto y video</h1>
         <p className="text-sm text-gray-500">
-          Elegí un producto y mejorá sus fotos, creá videos o armá la publicación con la IA que
-          quieras: gratis o paga. Las marcadas con ⭐ son las que mejor dejan el producto para vender.
+          Elegí un producto y mejorá sus fotos, creá videos o armá la publicación. Todo se hace
+          acá mismo, gratis.
         </p>
       </div>
+
+      <ConectarIAs cf={cfActivo} fal={falActivo} />
 
       <div className="bg-white border border-gray-200 rounded-xl p-4 flex flex-col gap-3">
         <form className="flex gap-2">
