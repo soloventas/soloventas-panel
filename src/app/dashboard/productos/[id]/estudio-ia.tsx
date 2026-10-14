@@ -11,6 +11,8 @@ import {
   FORMATOS,
   PERSONAS,
   VIDEO_TIPOS,
+  ACCIONES_UGC,
+  type AccionUgcId,
   promptVideo,
   promptsFotos,
   type EscenaId,
@@ -74,6 +76,7 @@ const ICONOS_FOTO: Record<FotoTipoId, string> = {
   mejorar: "✨",
 };
 const ICONOS_VIDEO: Record<VideoTipoId, string> = {
+  ugc: "🤳",
   giro: "🔄",
   persona: "🎬",
   colores: "🎨",
@@ -237,6 +240,9 @@ export default function EstudioIA({
   const [elegidas, setElegidas] = useState<string[]>([]);
   const [verTodas, setVerTodas] = useState(false);
   const [extra, setExtra] = useState("");
+  // Anuncio UGC: qué hace la persona y la descripción del vendedor.
+  const [accion, setAccion] = useState<AccionUgcId>("auto");
+  const [detalle, setDetalle] = useState("");
   const [texto, setTexto] = useState("");
   const [textoPos, setTextoPos] = useState<TextoPosId>("arriba");
   // Estilos de publicidad marcados: sale una edición por cada uno.
@@ -254,7 +260,9 @@ export default function EstudioIA({
   const videoTipo: VideoTipoId = tarea.videoTipo || "giro";
   const herramientaFoto = FOTO_TIPOS.find((f) => f.id === fotoTipo)!;
   const usaEscena = modo === "VIDEO" || herramientaFoto.usaEscena;
-  const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona";
+  const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona" || videoTipo === "ugc";
+  // El video con tus fotos no puede crear una persona: el UGC va con una IA de video.
+  const esUgc = modo === "VIDEO" && videoTipo === "ugc";
   const maxSeleccion = 4;
 
   // Por defecto usamos la primera foto como base.
@@ -292,10 +300,12 @@ export default function EstudioIA({
           extra,
           texto,
           textoPos,
+          accion,
+          detalle,
         }),
       },
     ];
-  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra, texto, textoPos, estilos]);
+  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra, texto, textoPos, estilos, accion, detalle]);
 
   const herramientas = herramientasPara(modo);
   const modelos = modelosPara(modo);
@@ -315,6 +325,13 @@ export default function EstudioIA({
   const seleccionadas = seleccion
     .map((id) => fotos.find((f) => f.id === id))
     .filter((f): f is Media => Boolean(f));
+
+  // Para el UGC hace falta una IA de video de verdad: salimos del video con fotos.
+  useEffect(() => {
+    if (esUgc && ia.VIDEO.clase === "panel") {
+      setIa((prev) => ({ ...prev, VIDEO: { clase: "gratis", id: herramientasPara("VIDEO")[0].id } }));
+    }
+  }, [esUgc, ia.VIDEO.clase]);
 
   function elegirIA(e: EleccionIA) {
     setIa((prev) => ({ ...prev, [modo]: e }));
@@ -400,6 +417,8 @@ export default function EstudioIA({
         videoTipo,
         duracion,
         extra,
+        accion,
+        detalle,
         texto,
         textoPos,
         estilos,
@@ -726,6 +745,29 @@ export default function EstudioIA({
           </div>
         )}
 
+        {esUgc && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium text-gray-700">¿Qué hace la persona con tu artículo?</p>
+            <div className="flex flex-wrap gap-2">
+              {ACCIONES_UGC.map((a) => (
+                <Chip key={a.id} activo={accion === a.id} onClick={() => setAccion(a.id)}>
+                  {a.nombre}
+                </Chip>
+              ))}
+            </div>
+            <textarea
+              value={detalle}
+              onChange={(e) => setDetalle(e.target.value.slice(0, 400))}
+              rows={3}
+              placeholder="Contale a la IA qué querés ver, en tus palabras. Ej.: una chica se arma una colita alta con la colita de pelo y sonríe a cámara · un chico juega con la pelota en la plaza · se pone la remera y muestra cómo le queda"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+            />
+            <p className="text-xs text-gray-500">
+              Para que salga mejor elegí como base una foto donde el artículo se vea claro.
+            </p>
+          </div>
+        )}
+
         <div>
           <p className="text-xs font-medium text-gray-700 mb-1.5">
             {modo === "FOTO" ? "Formato" : "Duración"}
@@ -834,12 +876,17 @@ export default function EstudioIA({
             {modo === "VIDEO" ? (
               <TarjetaIA
                 activa={eleccion.clase === "panel"}
-                onClick={() => elegirIA({ clase: "panel", id: VIDEO_PANEL.id })}
+                onClick={() => !esUgc && elegirIA({ clase: "panel", id: VIDEO_PANEL.id })}
                 nombre={VIDEO_PANEL.nombre}
                 empresa={VIDEO_PANEL.empresa}
-                detalle={VIDEO_PANEL.detalle}
+                detalle={
+                  esUgc
+                    ? "No sirve para UGC: solo mueve tus fotos, no crea una persona. Elegí una IA de video de abajo."
+                    : VIDEO_PANEL.detalle
+                }
                 etiqueta="Gratis"
-                recomendada
+                recomendada={!esUgc}
+                apagada={esUgc}
               />
             ) : (
               MODELOS_GRATIS.map((m) => (
