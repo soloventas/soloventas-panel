@@ -1,11 +1,12 @@
 // IA gratis dentro del panel: Cloudflare Workers AI regala 10.000 "neuronas"
 // por día. Con FLUX.2 Klein eso alcanza para decenas de fotos diarias sin pagar.
-// Necesita CF_ACCOUNT_ID y CF_API_TOKEN (permiso "Workers AI") en Vercel.
+// Necesita el Account ID y un token "Workers AI" (se cargan en "Conectar IAs").
 
 import type { FormatoId } from "./estudio";
+import { credencialesCF } from "./claves-ia";
 
-export function cfConfigurado() {
-  return Boolean(process.env.CF_ACCOUNT_ID && process.env.CF_API_TOKEN);
+export async function cfConfigurado() {
+  return Boolean(await credencialesCF());
 }
 
 export type ModeloGratis = {
@@ -55,6 +56,8 @@ export async function generarFotoGratis(
   referencias: Blob[],
   formato: FormatoId
 ): Promise<{ datos: ArrayBuffer; contentType: string }> {
+  const cred = await credencialesCF();
+  if (!cred) throw new Error("Falta conectar la IA gratis (Cloudflare) en \"Conectar IAs\".");
   const { width, height } = medidas(formato);
   const form = new FormData();
   form.append("prompt", prompt.slice(0, 2000));
@@ -63,10 +66,10 @@ export async function generarFotoGratis(
   referencias.slice(0, 4).forEach((r, i) => form.append(`input_image_${i}`, r, `ref${i}.jpg`));
 
   const r = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/${modelo.modelo}`,
+    `https://api.cloudflare.com/client/v4/accounts/${cred.cuenta.trim()}/ai/run/${modelo.modelo}`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${process.env.CF_API_TOKEN}` },
+      headers: { Authorization: `Bearer ${cred.token.trim()}` },
       body: form,
       cache: "no-store",
     }
@@ -83,7 +86,7 @@ export async function generarFotoGratis(
       throw new Error("Se terminó el cupo gratis de hoy. Mañana se renueva, o usá otra IA.");
     }
     if (r.status === 401 || r.status === 403) {
-      throw new Error("La clave de Cloudflare no es válida. Revisá CF_API_TOKEN en Vercel.");
+      throw new Error("La clave de Cloudflare no es válida. Volvé a conectarla en el Paso 1 · Conectar IAs.");
     }
     throw new Error(msg ? `La IA gratis respondió: ${msg}` : "La IA gratis no pudo generar la foto.");
   }
