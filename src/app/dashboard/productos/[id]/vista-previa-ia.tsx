@@ -238,7 +238,9 @@ export default function VistaPreviaIA({
   } else {
     cuadros.push({
       titulo:
-        videoTipo === "giro"
+        videoTipo === "ugc"
+          ? `Video ${duracion} s · UGC, alguien lo usa`
+          : videoTipo === "giro"
           ? `Video ${duracion} s · giro 360°`
           : videoTipo === "colores"
           ? `Video ${duracion} s · cambio de color`
@@ -247,7 +249,7 @@ export default function VistaPreviaIA({
       fondo: FONDOS[escena],
       proporcion: "9 / 16",
       video: true,
-      persona: videoTipo === "persona" ? persona : undefined,
+      persona: videoTipo === "persona" || videoTipo === "ugc" ? persona : undefined,
       final: fotos.length > 1 ? fotos[fotos.length - 1] : undefined,
     });
   }
