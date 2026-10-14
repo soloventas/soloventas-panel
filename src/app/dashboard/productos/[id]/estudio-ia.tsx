@@ -25,7 +25,20 @@ import {
 import VistaPreviaIA from "./vista-previa-ia";
 import { upload } from "@vercel/blob/client";
 import { MODELOS_GRATIS } from "@/lib/cloudflare-ia";
-import { achicarFoto, armarVideo, type VideoArmado } from "@/lib/video-navegador";
+import {
+  achicarFoto,
+  armarVideo,
+  duracionVideo,
+  ESTILOS_TEXTO,
+  STICKERS,
+  TRANSICIONES,
+  type EstiloTexto,
+  type PosSticker,
+  type PosTexto,
+  type TextoVideo,
+  type Transicion,
+  type VideoArmado,
+} from "@/lib/video-navegador";
 import {
   buscarModelo,
   costoTexto,
@@ -255,6 +268,18 @@ export default function EstudioIA({
   const [detalle, setDetalle] = useState("");
   const [texto, setTexto] = useState("");
   const [textoPos, setTextoPos] = useState<TextoPosId>("arriba");
+  // Editor del video con tus fotos (estilo CapCut, todo en el navegador).
+  const [segFoto, setSegFoto] = useState(3);
+  const [transicion, setTransicion] = useState<Transicion>("fundido");
+  const [movimiento, setMovimiento] = useState(true);
+  const [estiloTexto, setEstiloTexto] = useState<EstiloTexto>("pop");
+  const [texto2, setTexto2] = useState("");
+  const [texto2Pos, setTexto2Pos] = useState<PosTexto>("abajo");
+  const [sticker, setSticker] = useState<string | null>(null);
+  const [stickerPos, setStickerPos] = useState<PosSticker>("arriba-der");
+  const [musica, setMusica] = useState<File | null>(null);
+  const [volumen, setVolumen] = useState(0.8);
+  const [cierre, setCierre] = useState(true);
   // Estilos de publicidad marcados: sale una edición por cada uno.
   const [estilos, setEstilos] = useState<EstiloId[]>(["publicidad"]);
   const [copiado, setCopiado] = useState<number | null>(null);
@@ -275,7 +300,7 @@ export default function EstudioIA({
   const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona" || videoTipo === "ugc";
   // El video con tus fotos no puede crear una persona: el UGC va con una IA de video.
   const esUgc = modo === "VIDEO" && videoTipo === "ugc";
-  const maxSeleccion = 4;
+  const maxSeleccion = tarea.panelVideo ? 10 : 4;
 
   // Por defecto usamos la primera foto como base.
   useEffect(() => {
@@ -492,11 +517,19 @@ export default function EstudioIA({
     setError("");
     setProgreso(0);
     try {
+      const textos: TextoVideo[] = [
+        { texto: texto.trim(), pos: textoPos, estilo: estiloTexto },
+        { texto: texto2.trim(), pos: texto2Pos, estilo: estiloTexto },
+      ].filter((t) => t.texto);
       const v = await armarVideo({
         urls: seleccionadas.map((f) => f.url),
-        segundos: Math.max(duracion, seleccionadas.length * 3),
-        texto,
-        textoPos,
+        segundosPorFoto: segFoto,
+        transicion,
+        movimiento,
+        textos,
+        sticker: sticker ? { id: sticker, pos: stickerPos } : null,
+        musica: musica ? { archivo: musica, volumen } : null,
+        cierre,
         onProgreso: setProgreso,
       });
       setBorradores((prev) => [{ ...v, url: URL.createObjectURL(v.blob), clave: Date.now() }, ...prev]);
@@ -786,10 +819,16 @@ export default function EstudioIA({
 
         <div>
           <p className="text-xs font-medium text-gray-700 mb-1.5">
-            {modo === "FOTO" ? "Formato" : "Duración"}
+            {modo === "FOTO" ? "Formato" : panelVideo ? "Segundos por foto" : "Duración"}
           </p>
           <div className="flex flex-wrap gap-2">
-            {modo === "FOTO"
+            {panelVideo
+              ? [2, 3, 4, 5].map((d) => (
+                  <Chip key={d} activo={segFoto === d} onClick={() => setSegFoto(d)}>
+                    {d} s
+                  </Chip>
+                ))
+              : modo === "FOTO"
               ? FORMATOS.map((f) => (
                   <Chip key={f.id} activo={formato === f.id} onClick={() => setFormato(f.id)}>
                     {f.nombre}
@@ -801,7 +840,130 @@ export default function EstudioIA({
                   </Chip>
                 ))}
           </div>
+          {panelVideo && (
+            <p className="text-xs text-gray-500 mt-1">
+              El video dura {duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })}{" "}
+              segundos con {seleccionadas.length} foto{seleccionadas.length === 1 ? "" : "s"}
+              {cierre ? " y la placa final" : ""}.
+            </p>
+          )}
         </div>
+
+        {panelVideo && (
+          <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <p className="text-sm font-semibold text-navy">🎬 Edición del video</p>
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">Transición entre fotos</p>
+              <div className="flex flex-wrap gap-2">
+                {TRANSICIONES.map((t) => (
+                  <Chip key={t.id} activo={transicion === t.id} onClick={() => setTransicion(t.id)}>
+                    {t.nombre}
+                  </Chip>
+                ))}
+                <Chip activo={movimiento} onClick={() => setMovimiento((v) => !v)}>
+                  {movimiento ? "✓ " : ""}Movimiento suave
+                </Chip>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">Animación del texto</p>
+              <div className="flex flex-wrap gap-2">
+                {ESTILOS_TEXTO.map((t) => (
+                  <Chip key={t.id} activo={estiloTexto === t.id} onClick={() => setEstiloTexto(t.id)}>
+                    {t.nombre}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">Segundo texto (opcional)</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  value={texto2}
+                  onChange={(e) => setTexto2(e.target.value.slice(0, 80))}
+                  placeholder="Ej.: Consultanos ahora"
+                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                />
+                <div className="flex gap-2">
+                  {(["arriba", "centro", "abajo"] as PosTexto[]).map((p) => (
+                    <Chip key={p} activo={texto2Pos === p} onClick={() => setTexto2Pos(p)}>
+                      {p[0].toUpperCase() + p.slice(1)}
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">Sticker</p>
+              <div className="flex flex-wrap gap-2">
+                <Chip activo={sticker === null} onClick={() => setSticker(null)}>
+                  Sin sticker
+                </Chip>
+                {STICKERS.map((st) => (
+                  <Chip key={st.id} activo={sticker === st.id} onClick={() => setSticker(st.id)}>
+                    {st.texto}
+                  </Chip>
+                ))}
+              </div>
+              {sticker && (
+                <div className="flex flex-wrap gap-2 mt-1.5">
+                  {(
+                    [
+                      ["arriba-izq", "↖ Arriba izq."],
+                      ["arriba-der", "↗ Arriba der."],
+                      ["abajo-izq", "↙ Abajo izq."],
+                      ["abajo-der", "↘ Abajo der."],
+                    ] as [PosSticker, string][]
+                  ).map(([p, n]) => (
+                    <Chip key={p} activo={stickerPos === p} onClick={() => setStickerPos(p)}>
+                      {n}
+                    </Chip>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">Música de fondo (opcional)</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-navy cursor-pointer hover:bg-gray-100">
+                  {musica ? "Cambiar canción" : "🎵 Elegir canción"}
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    className="hidden"
+                    onChange={(e) => setMusica(e.target.files?.[0] || null)}
+                  />
+                </label>
+                {musica && (
+                  <>
+                    <span className="text-xs text-gray-700 truncate max-w-[12rem]">{musica.name}</span>
+                    <label className="flex items-center gap-2 text-xs text-gray-700">
+                      Volumen
+                      <input
+                        type="range"
+                        min={0.1}
+                        max={1}
+                        step={0.1}
+                        value={volumen}
+                        onChange={(e) => setVolumen(Number(e.target.value))}
+                      />
+                    </label>
+                    <button type="button" onClick={() => setMusica(null)} className="text-xs text-red-600 underline">
+                      Quitar
+                    </button>
+                  </>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">
+                Usá música que tengas derecho a usar (por ejemplo, de la biblioteca de audio libre de
+                YouTube). Al publicar en Instagram o TikTok también podés sumar un sonido de la app.
+              </p>
+            </div>
+            <Chip activo={cierre} onClick={() => setCierre((v) => !v)}>
+              {cierre ? "✓ " : ""}Placa final con tu marca (SOLO VENTAS · web · Consultanos ahora)
+            </Chip>
+          </div>
+        )}
 
         {modo === "FOTO" && (fotoTipo === "pack" || fotoTipo === "escena") && (
           <div>
@@ -869,8 +1031,10 @@ export default function EstudioIA({
             ))}
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            La IA lo escribe tal cual, en letra grande y sin tapar el producto. Dejalo vacío si no
-            querés texto.
+            {panelVideo
+              ? "Aparece animado sobre las fotos, con la animación que elijas abajo."
+              : "La IA lo escribe tal cual, en letra grande y sin tapar el producto."}{" "}
+            Dejalo vacío si no querés texto.
           </p>
         </div>
 
@@ -962,7 +1126,11 @@ export default function EstudioIA({
         escena={escena}
         persona={persona}
         formato={formato}
-        duracion={duracion}
+        duracion={
+          panelVideo
+            ? duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })
+            : duracion
+        }
         texto={texto.trim()}
         textoPos={textoPos}
         nombreIA={
@@ -1023,7 +1191,9 @@ export default function EstudioIA({
                     : "Armar video gratis"}
                 </button>
                 <span className="text-xs text-green-900">
-                  Gratis · {Math.max(duracion, seleccionadas.length * 3)} segundos, vertical para
+                  Gratis ·{" "}
+                  {duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })}{" "}
+                  segundos{musica ? " con música" : ""}, vertical para
                   Reels y TikTok · dejá esta pestaña abierta mientras se arma
                 </span>
               </div>
@@ -1034,9 +1204,9 @@ export default function EstudioIA({
                       <video
                         src={b.url}
                         controls
-                        muted
+                        muted={!b.conMusica}
                         playsInline
-                        autoPlay={i === 0}
+                        autoPlay={i === 0 && !b.conMusica}
                         className="w-full rounded-md bg-black"
                       />
                       <button
