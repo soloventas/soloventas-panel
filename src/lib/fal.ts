@@ -1,14 +1,15 @@
 // Conexión con fal.ai para generar fotos y videos con IA.
-// Necesita en Vercel: FAL_KEY. Sin esa clave, el Estudio IA funciona en
-// modo gratis (copiar la instrucción en Gemini / AI Studio).
+// Necesita la clave de fal.ai (se carga en "Conectar IAs" o FAL_KEY en Vercel).
 
-export function falConfigurado() {
-  return Boolean(process.env.FAL_KEY);
+import { claveFal } from "./claves-ia";
+
+export async function falConfigurado() {
+  return Boolean(await claveFal());
 }
 
-function cabeceras() {
+async function cabeceras() {
   return {
-    Authorization: `Key ${process.env.FAL_KEY}`,
+    Authorization: `Key ${(await claveFal()) || ""}`,
     "Content-Type": "application/json",
   };
 }
@@ -32,7 +33,7 @@ export async function enviarAFal(modelo: string, input: Record<string, unknown>)
   const data = await leer(
     await fetch(`https://queue.fal.run/${modelo}`, {
       method: "POST",
-      headers: cabeceras(),
+      headers: await cabeceras(),
       body: JSON.stringify(input),
       cache: "no-store",
     })
@@ -45,11 +46,11 @@ export async function enviarAFal(modelo: string, input: Record<string, unknown>)
 
 export async function estadoFal(statusUrl: string): Promise<string> {
   const data = await leer(
-    await fetch(statusUrl, { headers: cabeceras(), cache: "no-store" })
+    await fetch(statusUrl, { headers: await cabeceras(), cache: "no-store" })
   );
   return String(data.status || "");
 }
 
 export async function resultadoFal(responseUrl: string) {
-  return leer(await fetch(responseUrl, { headers: cabeceras(), cache: "no-store" }));
+  return leer(await fetch(responseUrl, { headers: await cabeceras(), cache: "no-store" }));
 }
