@@ -50,7 +50,14 @@ async function tiktokPost(ruta: string, token: string, body: unknown) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || (data?.error?.code && data.error.code !== "ok")) {
-    throw new ErrorTikTok(data?.error?.message || data?.error?.code || "TikTok rechazó el pedido.");
+    const codigo: string = data?.error?.code || "";
+    // Mientras la app no esté aprobada por TikTok, solo puede publicar en cuentas privadas.
+    if (codigo === "unaudited_client_can_only_post_to_private_accounts") {
+      throw new ErrorTikTok(
+        "TikTok todavía no aprobó la app: por ahora solo publica si la cuenta de TikTok es privada y elegís \"Solo yo\". Cuando TikTok la apruebe, se publica normal."
+      );
+    }
+    throw new ErrorTikTok(data?.error?.message || codigo || "TikTok rechazó el pedido.");
   }
   return data.data;
 }
