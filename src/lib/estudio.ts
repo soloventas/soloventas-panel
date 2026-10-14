@@ -14,7 +14,37 @@ export type EscenaId =
 
 export type PersonaId = "mujer" | "hombre" | "ninguna";
 export type FormatoId = "1:1" | "4:5" | "9:16";
-export type VideoTipoId = "giro" | "persona" | "colores";
+export type VideoTipoId = "ugc" | "giro" | "persona" | "colores";
+
+// Qué hace la persona en el anuncio UGC.
+export type AccionUgcId = "auto" | "ponerse" | "mostrar" | "usar" | "unboxing";
+export const ACCIONES_UGC: { id: AccionUgcId; nombre: string; en: string }[] = [
+  {
+    id: "auto",
+    nombre: "Según el artículo (automático)",
+    en: "Work out from the product how it is really used in everyday life and show exactly that: for example a hair tie is put into the hair to make a ponytail, a t-shirt is worn and its fit shown, a ball is played with, a bag is carried, an insole is placed inside a shoe",
+  },
+  {
+    id: "ponerse",
+    nombre: "Se lo pone / se lo coloca",
+    en: "the person puts the product on or places it step by step, so the viewer clearly sees how it is put on",
+  },
+  {
+    id: "mostrar",
+    nombre: "Lo muestra puesto",
+    en: "the person is already wearing or using the product and shows it off to the camera, turning slightly to show how it looks",
+  },
+  {
+    id: "usar",
+    nombre: "Lo usa / juega con él",
+    en: "the person actively uses or plays with the product in a natural, fun everyday moment",
+  },
+  {
+    id: "unboxing",
+    nombre: "Lo saca del paquete",
+    en: "the person takes the product out of its package with excitement, shows it to the camera and then tries it",
+  },
+];
 export type CalidadId = "estandar" | "premium";
 export type FotoTipoId = "pack" | "escena" | "catalogo" | "mejorar";
 export type TextoPosId = "arriba" | "abajo";
@@ -119,6 +149,11 @@ export const FORMATOS: { id: FormatoId; nombre: string }[] = [
 ];
 
 export const VIDEO_TIPOS: { id: VideoTipoId; nombre: string; ayuda: string }[] = [
+  {
+    id: "ugc",
+    nombre: "Anuncio UGC (alguien lo usa)",
+    ayuda: "Video estilo celular: una persona de IA (no real) se lo pone, lo usa o juega con tu artículo. Vos le contás qué tiene que hacer.",
+  },
   {
     id: "giro",
     nombre: "Giro 360°",
@@ -435,11 +470,25 @@ export function promptVideo(opciones: {
   escenaPersonalizada?: string;
   persona: PersonaId;
   extra?: string;
+  accion?: AccionUgcId;
+  detalle?: string;
 } & TextoImagen) {
   const escena = escenaEn(opciones.escena, opciones.escenaPersonalizada || "");
   const textoPedido = instruccionTexto(opciones, true);
   let base = "";
-  if (opciones.tipo === "giro") {
+  if (opciones.tipo === "ugc") {
+    const quien = opciones.persona === "hombre" ? "adult man" : "adult woman";
+    const accion = ACCIONES_UGC.find((a) => a.id === opciones.accion) || ACCIONES_UGC[0];
+    const detalle = (opciones.detalle || "").replace(/\s+/g, " ").trim().slice(0, 400);
+    base = [
+      `Authentic UGC-style vertical smartphone video for a social media ad (TikTok / Instagram Reels): a photorealistic AI-generated ${quien}, about 20 to 35 years old, clearly not a real or famous person, in ${escena}.`,
+      `Action: ${accion.en}.`,
+      detalle ? `The seller describes exactly what should happen (in Spanish): "${detalle}". Follow it.` : "",
+      "Natural handheld camera, casual and genuine feel like a real customer filming, natural light, the product always clearly visible at its real size and used exactly the way it is used in real life.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  } else if (opciones.tipo === "giro") {
     base = `Smooth 360-degree turntable rotation of the product, which stays centered in frame. Setting: ${escena}. Slow, elegant camera, soft premium lighting, commercial product video.`;
   } else if (opciones.tipo === "colores") {
     base = `Elegant product showcase: the product slowly rotates and smoothly transitions from the color variant in the first image to the color variant in the last image. Setting: ${escena}. Premium lighting, commercial ad style.`;
