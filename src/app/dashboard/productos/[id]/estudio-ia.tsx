@@ -67,6 +67,8 @@ type Tarea = {
   nombre: string;
   ayuda: string;
   recomendada?: boolean;
+  // Video gratis armado en el panel con tus fotos (sin IA de video).
+  panelVideo?: boolean;
 };
 
 const ICONOS_FOTO: Record<FotoTipoId, string> = {
@@ -92,12 +94,22 @@ const TAREAS: Tarea[] = [
     ayuda: f.ayuda,
     recomendada: f.id === "pack",
   })),
+  {
+    id: "video-fotos",
+    modo: "VIDEO" as Modo,
+    videoTipo: "giro" as VideoTipoId,
+    icono: "🎞️",
+    nombre: "Video con tus fotos",
+    ayuda: "Gratis: arma un video vertical con tus fotos reales, con movimiento suave, transiciones y tu texto.",
+    panelVideo: true,
+  },
+  // Videos con IA de video: necesitan una IA paga conectada (opcional).
   ...VIDEO_TIPOS.map((v) => ({
     id: `video-${v.id}`,
     modo: "VIDEO" as Modo,
     videoTipo: v.id,
     icono: ICONOS_VIDEO[v.id],
-    nombre: `Video: ${v.nombre}`,
+    nombre: `Video: ${v.nombre} · paga`,
     ayuda: v.ayuda,
   })),
 ];
@@ -228,9 +240,7 @@ export default function EstudioIA({
   const [duracion, setDuracion] = useState<5 | 10>(5);
   // Por defecto, siempre una gratis: primero la que funciona dentro del panel.
   const [ia, setIa] = useState<Record<Modo, EleccionIA>>(() => ({
-    FOTO: cfActivo
-      ? { clase: "panel", id: MODELOS_GRATIS[0].id }
-      : { clase: "gratis", id: herramientasPara("FOTO")[0].id },
+    FOTO: { clase: "panel", id: MODELOS_GRATIS[0].id },
     VIDEO: { clase: "panel", id: VIDEO_PANEL.id },
   }));
   const [progreso, setProgreso] = useState<number | null>(null);
@@ -254,12 +264,14 @@ export default function EstudioIA({
   const listosAntes = useRef<Set<string>>(new Set());
   const inicializado = useRef(false);
 
-  const tarea = TAREAS.find((t) => t.id === tareaId) || TAREAS[0];
+  // Los videos con IA (pagos) aparecen solo si conectaste una IA paga.
+  const tareas = TAREAS.filter((t) => t.modo === "FOTO" || t.panelVideo || falActivo);
+  const tarea = tareas.find((t) => t.id === tareaId) || tareas[0];
   const modo = tarea.modo;
   const fotoTipo: FotoTipoId = tarea.fotoTipo || "pack";
   const videoTipo: VideoTipoId = tarea.videoTipo || "giro";
   const herramientaFoto = FOTO_TIPOS.find((f) => f.id === fotoTipo)!;
-  const usaEscena = modo === "VIDEO" || herramientaFoto.usaEscena;
+  const usaEscena = modo === "VIDEO" ? !tarea.panelVideo : herramientaFoto.usaEscena;
   const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona" || videoTipo === "ugc";
   // El video con tus fotos no puede crear una persona: el UGC va con una IA de video.
   const esUgc = modo === "VIDEO" && videoTipo === "ugc";
@@ -326,12 +338,16 @@ export default function EstudioIA({
     .map((id) => fotos.find((f) => f.id === id))
     .filter((f): f is Media => Boolean(f));
 
-  // Para el UGC hace falta una IA de video de verdad: salimos del video con fotos.
+  // El video con tus fotos se hace en el panel; los otros videos, con la IA paga.
+  const panelVideo = Boolean(tarea.panelVideo);
   useEffect(() => {
-    if (esUgc && ia.VIDEO.clase === "panel") {
-      setIa((prev) => ({ ...prev, VIDEO: { clase: "gratis", id: herramientasPara("VIDEO")[0].id } }));
+    if (modo !== "VIDEO") return;
+    if (panelVideo && ia.VIDEO.clase !== "panel") {
+      setIa((prev) => ({ ...prev, VIDEO: { clase: "panel", id: VIDEO_PANEL.id } }));
+    } else if (!panelVideo && ia.VIDEO.clase !== "paga") {
+      setIa((prev) => ({ ...prev, VIDEO: { clase: "paga", id: modelosPara("VIDEO")[0].id } }));
     }
-  }, [esUgc, ia.VIDEO.clase]);
+  }, [modo, panelVideo, ia.VIDEO.clase]);
 
   function elegirIA(e: EleccionIA) {
     setIa((prev) => ({ ...prev, [modo]: e }));
@@ -648,7 +664,7 @@ export default function EstudioIA({
       {/* 1. Qué hacer */}
       <Paso numero={1} titulo="¿Qué querés hacer?">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {TAREAS.map((t) => (
+          {tareas.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -868,102 +884,73 @@ export default function EstudioIA({
 
       {/* 4. Con qué IA */}
       <Paso numero={4} titulo="¿Con qué IA?">
-        <div>
-          <p className="text-xs font-medium text-gray-700 mb-1.5">
-            ⭐ Gratis dentro de tu panel · sin salir de la página
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {modo === "VIDEO" ? (
-              <TarjetaIA
-                activa={eleccion.clase === "panel"}
-                onClick={() => !esUgc && elegirIA({ clase: "panel", id: VIDEO_PANEL.id })}
-                nombre={VIDEO_PANEL.nombre}
-                empresa={VIDEO_PANEL.empresa}
-                detalle={
-                  esUgc
-                    ? "No sirve para UGC: solo mueve tus fotos, no crea una persona. Elegí una IA de video de abajo."
-                    : VIDEO_PANEL.detalle
-                }
-                etiqueta="Gratis"
-                recomendada={!esUgc}
-                apagada={esUgc}
-              />
-            ) : (
-              MODELOS_GRATIS.map((m) => (
+        {(modo === "FOTO" || panelVideo) && (
+          <div>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">
+              ⭐ Gratis dentro de tu panel
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {modo === "VIDEO" ? (
                 <TarjetaIA
-                  key={m.id}
-                  activa={eleccion.clase === "panel" && modeloGratis.id === m.id}
-                  onClick={() => elegirIA({ clase: "panel", id: m.id })}
-                  nombre={m.nombre}
-                  empresa={m.empresa}
-                  detalle={`${m.nota} ${m.porDia}.`}
+                  activa={eleccion.clase === "panel"}
+                  onClick={() => elegirIA({ clase: "panel", id: VIDEO_PANEL.id })}
+                  nombre={VIDEO_PANEL.nombre}
+                  empresa={VIDEO_PANEL.empresa}
+                  detalle={VIDEO_PANEL.detalle}
                   etiqueta="Gratis"
-                  recomendada={m.recomendado}
-                  apagada={!cfActivo}
+                  recomendada
                 />
-              ))
+              ) : (
+                MODELOS_GRATIS.map((m) => (
+                  <TarjetaIA
+                    key={m.id}
+                    activa={eleccion.clase === "panel" && modeloGratis.id === m.id}
+                    onClick={() => elegirIA({ clase: "panel", id: m.id })}
+                    nombre={m.nombre}
+                    empresa={m.empresa}
+                    detalle={`${m.nota} ${m.porDia}.`}
+                    etiqueta="Gratis"
+                    recomendada={m.recomendado}
+                    apagada={!cfActivo}
+                  />
+                ))
+              )}
+            </div>
+            {modo === "FOTO" && !cfActivo && (
+              <p className="text-[11px] text-amber-700 mt-1.5">
+                Para usarlas conectá la IA gratis arriba, en el Paso 1 · Conectar IAs.
+              </p>
             )}
           </div>
-          {modo === "FOTO" && !cfActivo && (
-            <p className="text-[11px] text-amber-700 mt-1.5">
-              Para usarlas falta conectar la cuenta gratis de Cloudflare (se hace una sola vez).
+        )}
+        {falActivo && (modo === "FOTO" || !panelVideo) ? (
+          <div>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">
+              Paga · la hace el panel solo, con un clic
             </p>
-          )}
-        </div>
-        <div>
-          <p className="text-xs font-medium text-gray-700 mb-1.5">
-            Gratis en su web · el panel te arma la instrucción y la abrís
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {herramientasVisibles.map((h) => (
-              <TarjetaIA
-                key={h.id}
-                activa={eleccion.clase === "gratis" && herramienta.id === h.id}
-                onClick={() => elegirIA({ clase: "gratis", id: h.id })}
-                nombre={h.nombre}
-                empresa={h.empresa}
-                detalle={h.plan}
-                etiqueta="Gratis"
-                recomendada={false}
-              />
-            ))}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {modelos.map((m) => (
+                <TarjetaIA
+                  key={m.id}
+                  activa={eleccion.clase === "paga" && modelo.id === m.id}
+                  onClick={() => elegirIA({ clase: "paga", id: m.id })}
+                  nombre={m.nombre}
+                  empresa={m.empresa}
+                  detalle={m.nota}
+                  etiqueta={costoTexto(m, modo, duracion, cantidadFotos)}
+                  recomendada={false}
+                />
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-1.5">
-            <p className="text-[11px] text-gray-400">
-              Los límites gratis los pone cada empresa y pueden cambiar.
+        ) : (
+          !falActivo && (
+            <p className="text-[11px] text-gray-500">
+              ¿Querés videos con una persona usando el artículo? Son con IA paga: conectala (opcional)
+              en el Paso 1 · Conectar IAs.
             </p>
-            {herramientas.length > herramientasVisibles.length || verTodas ? (
-              <button
-                type="button"
-                onClick={() => setVerTodas((v) => !v)}
-                className="text-xs font-semibold text-navy underline"
-              >
-                {verTodas ? "Ver menos" : `Ver todas las gratis (${herramientas.length})`}
-              </button>
-            ) : null}
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-medium text-gray-700 mb-1.5">
-            Paga · la hace el panel solo, con un clic
-            {!falActivo && " (necesita activar fal.ai)"}
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {modelos.map((m) => (
-              <TarjetaIA
-                key={m.id}
-                activa={eleccion.clase === "paga" && modelo.id === m.id}
-                onClick={() => elegirIA({ clase: "paga", id: m.id })}
-                nombre={m.nombre}
-                empresa={m.empresa}
-                detalle={m.nota}
-                etiqueta={costoTexto(m, modo, duracion, cantidadFotos)}
-                recomendada={false}
-                apagada={!falActivo}
-              />
-            ))}
-          </div>
-        </div>
+          )
+        )}
       </Paso>
 
       {/* Vista previa de lo que va a hacer la IA elegida */}
@@ -1016,10 +1003,8 @@ export default function EstudioIA({
               </div>
             ) : (
               <p className="text-sm text-green-900">
-                Falta conectar la cuenta gratis de Cloudflare: cargá{" "}
-                <code className="bg-white/70 px-1 rounded">CF_ACCOUNT_ID</code> y{" "}
-                <code className="bg-white/70 px-1 rounded">CF_API_TOKEN</code> en Vercel. Mientras
-                tanto elegí una IA gratis de las de abajo.
+                Falta conectar la IA gratis: hacelo arriba en el <b>Paso 1 · Conectar IAs</b> (es
+                una sola vez).
               </p>
             )
           ) : (
@@ -1173,8 +1158,8 @@ export default function EstudioIA({
             </div>
           ) : (
             <p className="text-sm text-violet-900">
-              Para activarlo, cargá la clave <code className="bg-white/70 px-1 rounded">FAL_KEY</code>{" "}
-              en Vercel (cuenta en fal.ai, pago por uso). Mientras tanto elegí una IA gratis.
+              Para usarla, conectá fal.ai arriba en el <b>Paso 1 · Conectar IAs</b> (opcional, pago
+              por uso).
             </p>
           )}
         </div>
