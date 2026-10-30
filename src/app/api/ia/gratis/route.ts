@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { put } from "@vercel/blob";
+import { del, put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { maximoPorTipo } from "@/lib/media";
@@ -33,6 +33,8 @@ async function siguienteOrden(productoId: string, tipo: "FOTO" | "VIDEO") {
 // - multipart (datos + ref_0..ref_3): genera fotos con FLUX.2 Klein (Cloudflare).
 // - JSON { accion: "registrar", productoId, mediaId }: anota un video armado en
 //   el navegador para que aparezca en "Así quedó".
+// - multipart (datos { accion: "texto", productoId, mediaId } + foto): reemplaza
+//   un resultado de la IA por la misma foto con el texto escrito por el panel.
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
@@ -63,6 +65,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(trabajo, { status: 201 });
   }
 
+  const form = await req.formData().catch(() => null);
+  if (!form) return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
+  const datos = JSON.parse(String(form.get("datos") || "{}"));
+
+  if (datos.accion === "texto") {
+    const foto = form.get("foto");
+    if (!datos.productoId || !datos.mediaId || !foto || typeof foto === "string") {
+      return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
+    }
+    const media = await prisma.mediaProducto.findFirst({
+      where: { id: datos.mediaId, productoId: datos.productoId, tipo: "FOTO", origen: "IA" },
+      select: { id: true, url: true },
+    });
+    if (!media) return NextResponse.json({ error: "No se encontró la foto." }, { status: 404 });
+    const blob = await put(`productos/${datos.productoId}/fotos/ia-texto.jpg`, foto, {
+      access: "public",
+      addRandomSuffix: true,
+      contentType: "image/jpeg",
+    });
+    await prisma.mediaProducto.update({
+      where: { id: media.id },
+      data: { url: blob.url, pathname: blob.pathname, tamano: foto.size, nombre: "IA foto con texto.jpg" },
+    });
+    await del(media.url).catch(() => null);
+    return NextResponse.json({ id: media.id, url: blob.url });
+  }
+
   if (!(await cfConfigurado())) {
     return NextResponse.json(
       { error: "Falta conectar la IA gratis (Cloudflare) en Vercel." },
@@ -70,9 +99,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const form = await req.formData().catch(() => null);
-  if (!form) return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
-  const body = JSON.parse(String(form.get("datos") || "{}")) as {
+  const body = datos as {
     productoId?: string;
     modeloId?: string;
     fotoTipo?: FotoTipoId;
