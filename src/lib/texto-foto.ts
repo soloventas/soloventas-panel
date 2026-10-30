@@ -144,3 +144,55 @@ export async function ponerTextoEnFoto(url: string, t: TextoFoto): Promise<Blob>
     c.toBlob((b) => (b ? ok(b) : mal(new Error("No se pudo escribir el texto en la foto."))), "image/jpeg", 0.92)
   );
 }
+
+// Junta hasta 4 fotos reales en una sola imagen (collage), sin IA.
+// 1 foto: entera · 2: una arriba de la otra · 3: una grande arriba y dos abajo · 4: grilla 2x2.
+export async function armarCollage(
+  urls: string[],
+  formato: "4:5" | "1:1" | "9:16" = "4:5"
+): Promise<Blob> {
+  const W = 1080;
+  const H = formato === "1:1" ? 1080 : formato === "9:16" ? 1920 : 1350;
+  const imgs = await Promise.all(urls.slice(0, 4).map((u) => cargarImagen(u)));
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, W, H);
+  const g = 10; // separación blanca entre fotos
+  const n = imgs.length;
+  const celdas: [number, number, number, number][] =
+    n === 1
+      ? [[0, 0, W, H]]
+      : n === 2
+      ? [
+          [0, 0, W, (H - g) / 2],
+          [0, (H + g) / 2, W, (H - g) / 2],
+        ]
+      : n === 3
+      ? [
+          [0, 0, W, H * 0.58 - g / 2],
+          [0, H * 0.58 + g / 2, (W - g) / 2, H * 0.42 - g / 2],
+          [(W + g) / 2, H * 0.58 + g / 2, (W - g) / 2, H * 0.42 - g / 2],
+        ]
+      : [
+          [0, 0, (W - g) / 2, (H - g) / 2],
+          [(W + g) / 2, 0, (W - g) / 2, (H - g) / 2],
+          [0, (H + g) / 2, (W - g) / 2, (H - g) / 2],
+          [(W + g) / 2, (H + g) / 2, (W - g) / 2, (H - g) / 2],
+        ];
+  imgs.forEach((img, i) => {
+    const [x, y, w, h] = celdas[i];
+    // Recorte tipo "cover": llena la celda sin deformar la foto.
+    const escala = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+    const sw = w / escala;
+    const sh = h / escala;
+    const sx = (img.naturalWidth - sw) / 2;
+    const sy = (img.naturalHeight - sh) / 2;
+    ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+  });
+  return new Promise((ok, mal) =>
+    c.toBlob((b) => (b ? ok(b) : mal(new Error("No se pudo armar el collage."))), "image/jpeg", 0.92)
+  );
+}
