@@ -12,6 +12,7 @@ import Navegacion from "@/app/dashboard/edicion/navegacion";
 export default function SeccionMedios({
   productoId,
   producto,
+  descripcion = "",
   inicial,
   redes,
   iaActiva,
@@ -22,6 +23,7 @@ export default function SeccionMedios({
 }: {
   productoId: string;
   producto: string;
+  descripcion?: string;
   inicial: Media[];
   redes: { instagram: string | null; facebook: string | null; tiktok: string | null };
   iaActiva: boolean;
@@ -70,6 +72,7 @@ export default function SeccionMedios({
       <EstudioIA
         productoId={productoId}
         producto={producto}
+        descripcion={descripcion}
         fotos={fotosBase}
         falActivo={falActivo}
         cfActivo={cfActivo}
