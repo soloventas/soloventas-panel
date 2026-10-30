@@ -58,7 +58,9 @@ export function limpiarTexto(t?: string) {
 
 function instruccionTexto(t: TextoImagen, video = false) {
   const texto = limpiarTexto(t.texto);
-  if (!texto) return "";
+  // Sin texto pedido: que la IA no escriba nada (las letras le salen con faltas).
+  if (!texto)
+    return video ? "" : "Do not write any text, letters, words, numbers, captions, logos or watermarks on the image.";
   const donde = t.textoPos === "abajo" ? "bottom" : "top";
   return `Add this exact text, spelled exactly as written (it is in Spanish, keep accents and capitalization): "${texto}". Place it at the ${donde} of the ${video ? "frame, visible during the whole video" : "image"}, in a bold, clean, modern sans-serif font, large and easy to read on a phone, with strong contrast against the background, never covering the product. Do not add any other text.`;
 }
