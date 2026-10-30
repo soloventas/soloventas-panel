@@ -23,6 +23,7 @@ import {
   type VideoTipoId,
 } from "@/lib/estudio";
 import VistaPreviaIA from "./vista-previa-ia";
+import Navegacion from "@/app/dashboard/edicion/navegacion";
 import { upload } from "@vercel/blob/client";
 import { MODELOS_GRATIS } from "@/lib/cloudflare-ia";
 import {
@@ -127,6 +128,11 @@ const TAREAS: Tarea[] = [
   })),
 ];
 
+// En el paso 3 se pueden marcar hasta 10 fotos (el video con tus fotos usa
+// todas; las ediciones con IA usan las primeras 4).
+const MAX_FOTOS_BASE = 10;
+const MAX_FOTOS_IA = 4;
+
 // La IA elegida: gratis dentro del panel, una web gratis o un modelo pago.
 type EleccionIA = { clase: "panel" | "gratis" | "paga"; id: string };
 
@@ -159,28 +165,6 @@ function Chip({
     >
       {children}
     </button>
-  );
-}
-
-function Paso({
-  numero,
-  titulo,
-  children,
-}: {
-  numero: number;
-  titulo: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="flex flex-col gap-2.5">
-      <p className="text-sm font-semibold text-navy flex items-center gap-2">
-        <span className="w-6 h-6 rounded-full bg-navy text-white text-xs flex items-center justify-center">
-          {numero}
-        </span>
-        {titulo}
-      </p>
-      {children}
-    </section>
   );
 }
 
@@ -232,6 +216,8 @@ export default function EstudioIA({
   fotos,
   falActivo,
   cfActivo = false,
+  paso,
+  irA,
   onNuevos,
   onPublicar,
 }: {
@@ -240,6 +226,9 @@ export default function EstudioIA({
   fotos: Media[];
   falActivo: boolean;
   cfActivo?: boolean;
+  // Paso de Edición que se muestra (3 a 8) y cómo pasar a otro.
+  paso: number;
+  irA: (paso: number) => void;
   onNuevos: () => void | Promise<void>;
   // Lleva lo elegido al publicador (ya aprobado) para elegir redes y publicar.
   onPublicar?: (ids: string[], tipo: Modo) => void;
@@ -300,16 +289,16 @@ export default function EstudioIA({
   const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona" || videoTipo === "ugc";
   // El video con tus fotos no puede crear una persona: el UGC va con una IA de video.
   const esUgc = modo === "VIDEO" && videoTipo === "ugc";
-  const maxSeleccion = tarea.panelVideo ? 10 : 4;
+  const panelVideo = Boolean(tarea.panelVideo);
 
   // Por defecto usamos la primera foto como base.
   useEffect(() => {
     setSeleccion((prev) => {
-      const validas = prev.filter((id) => fotos.some((f) => f.id === id)).slice(0, maxSeleccion);
+      const validas = prev.filter((id) => fotos.some((f) => f.id === id)).slice(0, MAX_FOTOS_BASE);
       if (validas.length > 0) return validas;
       return fotos[0] ? [fotos[0].id] : [];
     });
-  }, [fotos, maxSeleccion]);
+  }, [fotos]);
 
   const prompts = useMemo(() => {
     if (modo === "FOTO") {
@@ -359,12 +348,13 @@ export default function EstudioIA({
   const cantidadFotos = modo === "FOTO" ? prompts.length : 0;
   const costo = costoTexto(modelo, modo, duracion, cantidadFotos);
 
-  const seleccionadas = seleccion
+  // Las fotos que de verdad se usan con la tarea elegida.
+  const usadas = panelVideo ? seleccion : seleccion.slice(0, MAX_FOTOS_IA);
+  const seleccionadas = usadas
     .map((id) => fotos.find((f) => f.id === id))
     .filter((f): f is Media => Boolean(f));
 
   // El video con tus fotos se hace en el panel; los otros videos, con la IA paga.
-  const panelVideo = Boolean(tarea.panelVideo);
   useEffect(() => {
     if (modo !== "VIDEO") return;
     if (panelVideo && ia.VIDEO.clase !== "panel") {
@@ -406,7 +396,7 @@ export default function EstudioIA({
     setSeleccion((prev) =>
       prev.includes(id)
         ? prev.filter((x) => x !== id)
-        : prev.length >= maxSeleccion
+        : prev.length >= MAX_FOTOS_BASE
         ? [...prev.slice(1), id]
         : [...prev, id]
     );
@@ -422,14 +412,23 @@ export default function EstudioIA({
     }
   }
 
-  const problema = (() => {
-    if (seleccion.length === 0) return "Elegí al menos una foto de base.";
+  const problemaOpciones = (() => {
     if (modo === "VIDEO" && videoTipo === "colores" && seleccion.length < 2)
-      return "Para el cambio de color elegí 2 fotos en distintos colores.";
+      return "Para el cambio de color marcá 2 fotos en distintos colores (paso 3).";
     if (usaEscena && escena === "personalizada" && !escenaPersonalizada.trim())
       return "Describí el lugar que querés.";
     return null;
   })();
+  const problema = seleccion.length === 0 ? "Elegí al menos una foto de base (paso 3)." : problemaOpciones;
+  const problemaIA = (() => {
+    if (ia[modo].clase === "panel" && modo === "FOTO" && !cfActivo)
+      return "Para usar la IA gratis conectala en el paso 1 · Conectar IAs.";
+    if (ia[modo].clase === "paga" && !falActivo)
+      return "Para usar esta IA conectá fal.ai en el paso 1 · Conectar IAs.";
+    return null;
+  })();
+  // Desde cuándo se pidió la última edición, para mostrar lo nuevo en el paso 7.
+  const [desde, setDesde] = useState<number | null>(null);
 
   async function generar() {
     if (problema) return;
@@ -442,13 +441,14 @@ export default function EstudioIA({
     if (!confirm(`¿Generar ${que} con ${modelo.nombre}? Costo: ${costo}.`)) return;
     setError("");
     setEnviando(true);
+    setDesde(Date.now());
     const r = await fetch("/api/ia/estudio", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         productoId,
         tipo: modo,
-        mediaIds: seleccion,
+        mediaIds: usadas,
         modeloId: modelo.id,
         fotoTipo,
         escena,
@@ -472,6 +472,7 @@ export default function EstudioIA({
       return;
     }
     await cargarTrabajos();
+    irA(7);
   }
 
   // Fotos con la IA gratis del panel (FLUX.2 Klein en Cloudflare).
@@ -479,6 +480,7 @@ export default function EstudioIA({
     if (problema) return;
     setError("");
     setEnviando(true);
+    setDesde(Date.now());
     try {
       const form = new FormData();
       form.append(
@@ -505,6 +507,7 @@ export default function EstudioIA({
       if (data.aviso) setError(data.aviso);
       await cargarTrabajos();
       await onNuevos();
+      irA(7);
     } catch (e) {
       setError(e instanceof Error ? e.message : "La IA gratis no pudo generar la foto.");
     }
@@ -516,6 +519,7 @@ export default function EstudioIA({
     if (problema) return;
     setError("");
     setProgreso(0);
+    setDesde(Date.now());
     try {
       const textos: TextoVideo[] = [
         { texto: texto.trim(), pos: textoPos, estilo: estiloTexto },
@@ -533,6 +537,7 @@ export default function EstudioIA({
         onProgreso: setProgreso,
       });
       setBorradores((prev) => [{ ...v, url: URL.createObjectURL(v.blob), clave: Date.now() }, ...prev]);
+      irA(7);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo armar el video.");
     }
@@ -671,833 +676,1014 @@ export default function EstudioIA({
   const variosVideos = mediasElegidas.filter((m) => m.tipo === "VIDEO").length > 1;
   const otrosTrabajos = trabajos.filter((t) => !(t.estado === "LISTO" && t.media));
 
-  if (fotos.length === 0) {
+  // Lo último que se hizo (paso 7). Margen de 1 minuto por si el reloj del servidor difiere.
+  const nuevos = desde
+    ? resultados.filter((t) => new Date(t.createdAt).getTime() >= desde - 60_000)
+    : [];
+  const ultimos = nuevos.length > 0 ? nuevos : resultados.slice(0, 6);
+
+  // Paso 8: repetir la misma edición con las mismas opciones.
+  function hacerDeNuevo() {
+    if (eleccion.clase === "paga") return generar();
+    if (modo === "VIDEO") return armarVideoGratis();
+    return generarGratis();
+  }
+
+  if (paso < 3 || paso > 8) return null;
+
+  if (fotos.length === 0 && paso !== 8) {
     return (
-      <div className="bg-white border border-gray-200 rounded-xl p-5">
-        <p className="text-xs font-bold uppercase tracking-wide text-gold mb-2">Estudio IA</p>
+      <div className="flex flex-col gap-4">
         <p className="text-sm text-gray-600">
-          Subí al menos una foto real del producto (arriba, en Fotos y videos) para crear fotos y
-          videos con IA.
+          Este producto todavía no tiene fotos. Subí al menos una foto real del producto (arriba, en
+          “Subir o cambiar fotos”) para poder editarla.
         </p>
+        <Navegacion onAtras={() => irA(paso === 3 ? 2 : 3)} />
       </div>
     );
   }
 
+
   const pasos = herramienta.pasos[modo];
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-6">
-      <div>
-        <p className="text-xs font-bold uppercase tracking-wide text-gold">Estudio IA</p>
-        <p className="text-sm text-gray-600 mt-0.5">
-          Elegí qué querés hacer, con qué fotos y con qué IA. Lo marcado con ⭐ es lo que mejor vende.
-        </p>
-      </div>
-
-      {/* 1. Qué hacer */}
-      <Paso numero={1} titulo="¿Qué querés hacer?">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {tareas.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTareaId(t.id)}
-              className={`text-left rounded-lg border-2 p-2.5 transition ${
-                tarea.id === t.id ? "border-navy bg-navy/5" : "border-gray-200 hover:border-gray-400"
-              }`}
-            >
-              <span className="text-lg leading-none">{t.icono}</span>
-              <span className="block text-sm font-semibold text-gray-900 mt-1">
-                {t.recomendada && "⭐ "}
-                {t.nombre}
-              </span>
-              <span className="block text-[10px] uppercase tracking-wide text-gray-400 mt-0.5">
-                {t.modo === "FOTO" ? "Foto" : "Video"}
-              </span>
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-gray-500">{tarea.ayuda}</p>
-      </Paso>
-
-      {/* 2. Fotos de base */}
-      <Paso
-        numero={2}
-        titulo={`${modo === "FOTO" ? "Foto(s) del producto" : "Foto(s) de base del video"} · hasta ${maxSeleccion}`}
-      >
-        <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-          {fotos.map((f) => {
-            const pos = seleccion.indexOf(f.id);
-            return (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => alternar(f.id)}
-                className={`relative rounded-lg overflow-hidden border-2 ${
-                  pos >= 0 ? "border-navy" : "border-transparent opacity-60 hover:opacity-100"
-                }`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={f.url} alt="" className="w-full aspect-square object-cover" />
-                {pos >= 0 && (
-                  <span className="absolute top-1 left-1 w-5 h-5 rounded-full bg-navy text-white text-[11px] font-bold flex items-center justify-center">
-                    {pos + 1}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        {modo === "VIDEO" && (
-          <p className="text-xs text-gray-500">
-            La foto 1 es el inicio del video. Con las IA de video se usan la primera y la última.
+    <div className="flex flex-col gap-6">
+      {/* Paso 3 · Fotos */}
+      {paso === 3 && (
+        <>
+          <p className="text-sm font-semibold text-navy">
+            Fotos marcadas: {seleccion.length} de {fotos.length} · podés marcar hasta {MAX_FOTOS_BASE}
           </p>
-        )}
-      </Paso>
-
-      {/* 3. Cómo lo querés */}
-      <Paso numero={3} titulo="¿Cómo lo querés?">
-        {usaEscena && (
-          <div>
-            <p className="text-xs font-medium text-gray-700 mb-1.5">Lugar / ambiente</p>
-            <div className="flex flex-wrap gap-2">
-              {ESCENAS.map((e) => (
-                <Chip key={e.id} activo={escena === e.id} onClick={() => setEscena(e.id)}>
-                  {e.nombre}
-                </Chip>
-              ))}
-            </div>
-            {escena === "personalizada" && (
-              <input
-                value={escenaPersonalizada}
-                onChange={(e) => setEscenaPersonalizada(e.target.value)}
-                placeholder="Describilo (podés escribir en español): ej. un festival de música al aire libre"
-                className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-              />
-            )}
-          </div>
-        )}
-
-        {usaPersona && (
-          <div>
-            <p className="text-xs font-medium text-gray-700 mb-1.5">¿Quién aparece?</p>
-            <div className="flex flex-wrap gap-2">
-              {PERSONAS.filter((p) => p.id !== "ninguna").map((p) => (
-                <Chip key={p.id} activo={persona === p.id} onClick={() => setPersona(p.id)}>
-                  {p.nombre}
-                </Chip>
-              ))}
-            </div>
-            <p className="text-xs text-gray-500 mt-1.5">
-              Siempre son personas adultas creadas por IA, que no existen.
-            </p>
-          </div>
-        )}
-
-        {esUgc && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium text-gray-700">¿Qué hace la persona con tu artículo?</p>
-            <div className="flex flex-wrap gap-2">
-              {ACCIONES_UGC.map((a) => (
-                <Chip key={a.id} activo={accion === a.id} onClick={() => setAccion(a.id)}>
-                  {a.nombre}
-                </Chip>
-              ))}
-            </div>
-            <textarea
-              value={detalle}
-              onChange={(e) => setDetalle(e.target.value.slice(0, 400))}
-              rows={3}
-              placeholder="Contale a la IA qué querés ver, en tus palabras. Ej.: una chica se arma una colita alta con la colita de pelo y sonríe a cámara · un chico juega con la pelota en la plaza · se pone la remera y muestra cómo le queda"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-            />
-            <p className="text-xs text-gray-500">
-              Para que salga mejor elegí como base una foto donde el artículo se vea claro.
-            </p>
-          </div>
-        )}
-
-        <div>
-          <p className="text-xs font-medium text-gray-700 mb-1.5">
-            {modo === "FOTO" ? "Formato" : panelVideo ? "Segundos por foto" : "Duración"}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {panelVideo
-              ? [2, 3, 4, 5].map((d) => (
-                  <Chip key={d} activo={segFoto === d} onClick={() => setSegFoto(d)}>
-                    {d} s
-                  </Chip>
-                ))
-              : modo === "FOTO"
-              ? FORMATOS.map((f) => (
-                  <Chip key={f.id} activo={formato === f.id} onClick={() => setFormato(f.id)}>
-                    {f.nombre}
-                  </Chip>
-                ))
-              : [5, 10].map((d) => (
-                  <Chip key={d} activo={duracion === d} onClick={() => setDuracion(d as 5 | 10)}>
-                    {d} segundos
-                  </Chip>
-                ))}
-          </div>
-          {panelVideo && (
-            <p className="text-xs text-gray-500 mt-1">
-              El video dura {duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })}{" "}
-              segundos con {seleccionadas.length} foto{seleccionadas.length === 1 ? "" : "s"}
-              {cierre ? " y la placa final" : ""}.
-            </p>
-          )}
-        </div>
-
-        {panelVideo && (
-          <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-            <p className="text-sm font-semibold text-navy">🎬 Edición del video</p>
-            <div>
-              <p className="text-xs font-medium text-gray-700 mb-1.5">Transición entre fotos</p>
-              <div className="flex flex-wrap gap-2">
-                {TRANSICIONES.map((t) => (
-                  <Chip key={t.id} activo={transicion === t.id} onClick={() => setTransicion(t.id)}>
-                    {t.nombre}
-                  </Chip>
-                ))}
-                <Chip activo={movimiento} onClick={() => setMovimiento((v) => !v)}>
-                  {movimiento ? "✓ " : ""}Movimiento suave
-                </Chip>
-              </div>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-gray-700 mb-1.5">Animación del texto</p>
-              <div className="flex flex-wrap gap-2">
-                {ESTILOS_TEXTO.map((t) => (
-                  <Chip key={t.id} activo={estiloTexto === t.id} onClick={() => setEstiloTexto(t.id)}>
-                    {t.nombre}
-                  </Chip>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-gray-700 mb-1.5">Segundo texto (opcional)</p>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  value={texto2}
-                  onChange={(e) => setTexto2(e.target.value.slice(0, 80))}
-                  placeholder="Ej.: Consultanos ahora"
-                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-                />
-                <div className="flex gap-2">
-                  {(["arriba", "centro", "abajo"] as PosTexto[]).map((p) => (
-                    <Chip key={p} activo={texto2Pos === p} onClick={() => setTexto2Pos(p)}>
-                      {p[0].toUpperCase() + p.slice(1)}
-                    </Chip>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-gray-700 mb-1.5">Sticker</p>
-              <div className="flex flex-wrap gap-2">
-                <Chip activo={sticker === null} onClick={() => setSticker(null)}>
-                  Sin sticker
-                </Chip>
-                {STICKERS.map((st) => (
-                  <Chip key={st.id} activo={sticker === st.id} onClick={() => setSticker(st.id)}>
-                    {st.texto}
-                  </Chip>
-                ))}
-              </div>
-              {sticker && (
-                <div className="flex flex-wrap gap-2 mt-1.5">
-                  {(
-                    [
-                      ["arriba-izq", "↖ Arriba izq."],
-                      ["arriba-der", "↗ Arriba der."],
-                      ["abajo-izq", "↙ Abajo izq."],
-                      ["abajo-der", "↘ Abajo der."],
-                    ] as [PosSticker, string][]
-                  ).map(([p, n]) => (
-                    <Chip key={p} activo={stickerPos === p} onClick={() => setStickerPos(p)}>
-                      {n}
-                    </Chip>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div>
-              <p className="text-xs font-medium text-gray-700 mb-1.5">Música de fondo (opcional)</p>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-navy cursor-pointer hover:bg-gray-100">
-                  {musica ? "Cambiar canción" : "🎵 Elegir canción"}
-                  <input
-                    type="file"
-                    accept="audio/*"
-                    className="hidden"
-                    onChange={(e) => setMusica(e.target.files?.[0] || null)}
-                  />
-                </label>
-                {musica && (
-                  <>
-                    <span className="text-xs text-gray-700 truncate max-w-[12rem]">{musica.name}</span>
-                    <label className="flex items-center gap-2 text-xs text-gray-700">
-                      Volumen
-                      <input
-                        type="range"
-                        min={0.1}
-                        max={1}
-                        step={0.1}
-                        value={volumen}
-                        onChange={(e) => setVolumen(Number(e.target.value))}
-                      />
-                    </label>
-                    <button type="button" onClick={() => setMusica(null)} className="text-xs text-red-600 underline">
-                      Quitar
-                    </button>
-                  </>
-                )}
-              </div>
-              <p className="text-[11px] text-gray-500 mt-1">
-                Usá música que tengas derecho a usar (por ejemplo, de la biblioteca de audio libre de
-                YouTube). Al publicar en Instagram o TikTok también podés sumar un sonido de la app.
-              </p>
-            </div>
-            <Chip activo={cierre} onClick={() => setCierre((v) => !v)}>
-              {cierre ? "✓ " : ""}Placa final con tu marca (SOLO VENTAS · web · Consultanos ahora)
-            </Chip>
-          </div>
-        )}
-
-        {modo === "FOTO" && (fotoTipo === "pack" || fotoTipo === "escena") && (
-          <div>
-            <p className="text-xs font-medium text-gray-700 mb-1.5">
-              Estilo de publicidad · marcá hasta {MAX_ESTILOS} y sale una foto por cada uno
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {ESTILOS.map((e) => {
-                const activo = estilos.includes(e.id);
-                return (
-                  <Chip
-                    key={e.id}
-                    activo={activo}
-                    onClick={() =>
-                      setEstilos((prev) =>
-                        activo
-                          ? prev.length > 1
-                            ? prev.filter((x) => x !== e.id)
-                            : prev
-                          : prev.length >= MAX_ESTILOS
-                          ? [...prev.slice(1), e.id]
-                          : [...prev, e.id]
-                      )
-                    }
-                  >
-                    {activo ? "✓ " : ""}
-                    {e.nombre}
-                  </Chip>
-                );
-              })}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              {fotoTipo === "pack"
-                ? `Salen ${cantidadFotos} fotos: el producto real solo y una con modelo por cada estilo.`
-                : `Salen ${cantidadFotos} foto${cantidadFotos === 1 ? "" : "s"}, una por estilo.`}
-            </p>
-          </div>
-        )}
-
-        <div>
-          <p className="text-xs font-medium text-gray-700 mb-1.5">
-            Texto escrito {modo === "FOTO" ? "sobre la foto" : "en el video"} (opcional)
-          </p>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input
-              value={texto}
-              onChange={(e) => setTexto(e.target.value.slice(0, 80))}
-              placeholder="Ej.: NUEVO INGRESO · Consultá precio"
-              className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-            />
-            <div className="flex gap-2">
-              <Chip activo={textoPos === "arriba"} onClick={() => setTextoPos("arriba")}>
-                Arriba
-              </Chip>
-              <Chip activo={textoPos === "abajo"} onClick={() => setTextoPos("abajo")}>
-                Abajo
-              </Chip>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 mt-1.5">
-            {[producto, "Nuevo ingreso", "Consultá precio", "www.soloventas.com.ar"].map((t) => (
-              <Chip key={t} activo={texto === t} onClick={() => setTexto(texto === t ? "" : t)}>
-                {t}
-              </Chip>
-            ))}
-          </div>
-          <p className="text-xs text-gray-500 mt-1">
-            {panelVideo
-              ? "Aparece animado sobre las fotos, con la animación que elijas abajo."
-              : "La IA lo escribe tal cual, en letra grande y sin tapar el producto."}{" "}
-            Dejalo vacío si no querés texto.
-          </p>
-        </div>
-
-        <input
-          value={extra}
-          onChange={(e) => setExtra(e.target.value)}
-          placeholder="Detalle extra (opcional): ej. luz de atardecer, tonos pastel, fondo con palmeras"
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-        />
-      </Paso>
-
-      {/* 4. Con qué IA */}
-      <Paso numero={4} titulo="¿Con qué IA?">
-        {(modo === "FOTO" || panelVideo) && (
-          <div>
-            <p className="text-xs font-medium text-gray-700 mb-1.5">
-              ⭐ Gratis dentro de tu panel
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {modo === "VIDEO" ? (
-                <TarjetaIA
-                  activa={eleccion.clase === "panel"}
-                  onClick={() => elegirIA({ clase: "panel", id: VIDEO_PANEL.id })}
-                  nombre={VIDEO_PANEL.nombre}
-                  empresa={VIDEO_PANEL.empresa}
-                  detalle={VIDEO_PANEL.detalle}
-                  etiqueta="Gratis"
-                  recomendada
-                />
-              ) : (
-                MODELOS_GRATIS.map((m) => (
-                  <TarjetaIA
-                    key={m.id}
-                    activa={eleccion.clase === "panel" && modeloGratis.id === m.id}
-                    onClick={() => elegirIA({ clase: "panel", id: m.id })}
-                    nombre={m.nombre}
-                    empresa={m.empresa}
-                    detalle={`${m.nota} ${m.porDia}.`}
-                    etiqueta="Gratis"
-                    recomendada={m.recomendado}
-                    apagada={!cfActivo}
-                  />
-                ))
-              )}
-            </div>
-            {modo === "FOTO" && !cfActivo && (
-              <p className="text-[11px] text-amber-700 mt-1.5">
-                Para usarlas conectá la IA gratis arriba, en el Paso 1 · Conectar IAs.
-              </p>
-            )}
-          </div>
-        )}
-        {falActivo && (modo === "FOTO" || !panelVideo) ? (
-          <div>
-            <p className="text-xs font-medium text-gray-700 mb-1.5">
-              Paga · la hace el panel solo, con un clic
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {modelos.map((m) => (
-                <TarjetaIA
-                  key={m.id}
-                  activa={eleccion.clase === "paga" && modelo.id === m.id}
-                  onClick={() => elegirIA({ clase: "paga", id: m.id })}
-                  nombre={m.nombre}
-                  empresa={m.empresa}
-                  detalle={m.nota}
-                  etiqueta={costoTexto(m, modo, duracion, cantidadFotos)}
-                  recomendada={false}
-                />
-              ))}
-            </div>
-          </div>
-        ) : (
-          !falActivo && (
-            <p className="text-[11px] text-gray-500">
-              ¿Querés videos con una persona usando el artículo? Son con IA paga: conectala (opcional)
-              en el Paso 1 · Conectar IAs.
-            </p>
-          )
-        )}
-      </Paso>
-
-      {/* Vista previa de lo que va a hacer la IA elegida */}
-      <VistaPreviaIA
-        modo={modo}
-        fotoTipo={fotoTipo}
-        videoTipo={videoTipo}
-        fotos={seleccionadas}
-        escena={escena}
-        persona={persona}
-        formato={formato}
-        duracion={
-          panelVideo
-            ? duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })
-            : duracion
-        }
-        texto={texto.trim()}
-        textoPos={textoPos}
-        nombreIA={
-          eleccion.clase === "panel" ? nombrePanel : eleccion.clase === "gratis" ? herramienta.nombre : modelo.nombre
-        }
-        etiquetaIA={eleccion.clase === "paga" ? costo : eleccion.clase === "panel" ? "Gratis en tu panel" : "Gratis"}
-        gratis={eleccion.clase !== "paga"}
-        videoConFotos={modo === "VIDEO" && eleccion.clase === "panel"}
-        estilos={ESTILOS.filter((e) => estilos.includes(e.id))}
-      />
-
-      {problema && <p className="text-sm text-amber-700">{problema}</p>}
-
-      {/* 5. Hacerlo */}
-      {eleccion.clase === "panel" ? (
-        <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
-          <p className="text-sm font-semibold text-green-900">
-            Hacelo gratis acá mismo con {nombrePanel}
-          </p>
-          {modo === "FOTO" ? (
-            cfActivo ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={generarGratis}
-                  disabled={Boolean(problema) || enviando}
-                  className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
-                >
-                  {enviando
-                    ? "Generando..."
-                    : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
-                        cantidadFotos > 1 ? `Generar ${cantidadFotos} fotos gratis` : "Generar foto gratis"
-                      }`}
-                </button>
-                <span className="text-xs text-green-900">
-                  Gratis · {modeloGratis.porDia} · tarda unos segundos
-                </span>
-              </div>
-            ) : (
-              <p className="text-sm text-green-900">
-                Falta conectar la IA gratis: hacelo arriba en el <b>Paso 1 · Conectar IAs</b> (es
-                una sola vez).
-              </p>
-            )
-          ) : (
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={armarVideoGratis}
-                  disabled={Boolean(problema) || progreso !== null || enviando}
-                  className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
-                >
-                  {progreso !== null
-                    ? `Armando video... ${progreso}%`
-                    : borradores.length > 0
-                    ? "Armar otra versión"
-                    : "Armar video gratis"}
-                </button>
-                <span className="text-xs text-green-900">
-                  Gratis ·{" "}
-                  {duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })}{" "}
-                  segundos{musica ? " con música" : ""}, vertical para
-                  Reels y TikTok · dejá esta pestaña abierta mientras se arma
-                </span>
-              </div>
-              {borradores.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {borradores.map((b, i) => (
-                    <div key={b.clave} className="flex flex-col gap-1.5">
-                      <video
-                        src={b.url}
-                        controls
-                        muted={!b.conMusica}
-                        playsInline
-                        autoPlay={i === 0 && !b.conMusica}
-                        className="w-full rounded-md bg-black"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => guardarVideo(b)}
-                        disabled={enviando}
-                        className="rounded-md bg-navy text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90 disabled:opacity-50"
-                      >
-                        {enviando ? "Guardando..." : "Me gusta, guardarlo"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => quitarBorrador(b.clave)}
-                        className="text-xs text-red-600 underline"
-                      >
-                        Quitar
-                      </button>
-                      {b.extension === "webm" && (
-                        <span className="text-[11px] text-amber-700">
-                          Salió en WebM: para Instagram armalo desde Chrome actualizado (MP4).
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      ) : eleccion.clase === "gratis" ? (
-        <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-green-900">
-              Hacelo gratis con {herramienta.nombre}
-            </p>
-            <a
-              href={herramienta.url}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-md bg-green-700 text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90"
-            >
-              Abrir {herramienta.nombre} ↗
-            </a>
-          </div>
-          <ol className="text-sm text-green-950 list-decimal pl-5 flex flex-col gap-1">
-            <li>
-              Guardá la foto de base:{" "}
-              {seleccionadas.map((f, i) => (
-                <a key={f.id} href={f.url} target="_blank" rel="noreferrer" className="underline mr-2">
-                  abrir foto {i + 1}
-                </a>
-              ))}
-              (clic derecho → Guardar imagen).
-            </li>
-            <li>
-              Copiá la instrucción de abajo y abrí {herramienta.nombre}. {pasos}
-              {cantidadFotos > 1 && " Para cada foto, pegá su instrucción (1, 2, 3...)."}
-            </li>
-            <li>
-              Descargá el resultado y subilo arriba en <b>Fotos y videos</b>, tildando{" "}
-              <i>&quot;Son fotos o videos generados con IA&quot;</i>.
-              {cantidadFotos > 1 && " Para publicarlas juntas elegí “Carrusel” en Publicar en redes."}
-            </li>
-          </ol>
-          {prompts.map((p, i) => (
-            <div key={p.titulo} className="flex flex-col gap-1.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-green-900">
-                  {prompts.length > 1 ? `Instrucción ${i + 1} · ` : ""}
-                  {p.titulo}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => copiar(i)}
-                  disabled={Boolean(problema)}
-                  className="rounded-md bg-white border border-green-700 text-green-800 text-xs font-semibold px-3 py-1.5 hover:bg-green-100 disabled:opacity-50"
-                >
-                  {copiado === i ? "✓ Copiada" : `Copiar instrucción${prompts.length > 1 ? ` ${i + 1}` : ""}`}
-                </button>
-              </div>
-              <textarea
-                readOnly
-                value={p.prompt}
-                rows={3}
-                onFocus={(e) => e.currentTarget.select()}
-                className="w-full rounded-md border border-green-200 bg-white px-3 py-2 text-xs text-gray-700 font-mono"
-              />
-            </div>
-          ))}
-          <p className="text-xs text-green-900/80">
-            La instrucción va en inglés porque las IA la entienden mejor. Si el resultado cambia el
-            producto, pedile en el mismo chat: &quot;keep the product exactly as in the original
-            photo&quot;.
-          </p>
-        </div>
-      ) : (
-        <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-4 flex flex-col gap-3">
-          <p className="text-sm font-semibold text-violet-900">
-            Hacelo automático con {modelo.nombre}
-          </p>
-          {falActivo ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={generar}
-                disabled={Boolean(problema) || enviando}
-                className="rounded-md bg-violet-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
-              >
-                {enviando
-                  ? "Enviando..."
-                  : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
-                      modo === "FOTO" ? (cantidadFotos > 1 ? `Generar ${cantidadFotos} fotos` : "Generar foto") : "Generar video"
-                    }`}
-              </button>
-              <span className="text-xs text-violet-900">
-                Costo: {costo}
-                {modo === "VIDEO" ? " · tarda 1 a 5 minutos" : " · tarda unos segundos"}
-              </span>
-            </div>
-          ) : (
-            <p className="text-sm text-violet-900">
-              Para usarla, conectá fal.ai arriba en el <b>Paso 1 · Conectar IAs</b> (opcional, pago
-              por uso).
-            </p>
-          )}
-        </div>
-      )}
-
-      {resultados.length > 0 && (
-        <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold text-navy">
-                Así quedó · {resultados.length} versión{resultados.length === 1 ? "" : "es"}
-              </p>
-              <p className="text-xs text-gray-500">
-                Tocá &quot;Más opciones como esta&quot; en la que te guste, o probá otras IA o estilos
-                arriba: cada versión nueva se suma acá y no se borra nada hasta que vos la descartes. Marcá las que te gusten (de cualquier IA) y publicalas
-                juntas.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={actualizar}
-              disabled={ocupado !== null}
-              className="rounded-md border border-gray-300 text-gray-700 text-xs font-semibold px-3 py-1.5 hover:border-navy disabled:opacity-50"
-            >
-              {ocupado === "actualizar" ? "Actualizando..." : "↻ Actualizar"}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {resultados.map((t) => {
-              const m = t.media!;
-              const pos = elegidas.indexOf(m.id);
+          <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+            {fotos.map((f) => {
+              const pos = seleccion.indexOf(f.id);
               return (
-                <div
-                  key={m.id}
-                  className={`rounded-lg border-2 p-1.5 flex flex-col gap-1.5 ${
-                    pos >= 0 ? "border-navy bg-navy/5" : "border-gray-200"
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => alternar(f.id)}
+                  className={`relative rounded-lg overflow-hidden border-2 ${
+                    pos >= 0 ? "border-navy" : "border-transparent opacity-60 hover:opacity-100"
                   }`}
                 >
-                  <button type="button" onClick={() => alternarElegida(m.id)} className="relative block">
-                    {m.tipo === "FOTO" ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.url} alt="" className="w-full aspect-[4/5] rounded-md object-cover bg-gray-50" />
-                    ) : (
-                      <video
-                        src={m.url}
-                        muted
-                        playsInline
-                        controls
-                        className="w-full aspect-[4/5] rounded-md bg-black object-cover"
-                      />
-                    )}
-                    <span
-                      className={`absolute top-1.5 left-1.5 min-w-6 h-6 px-1 rounded-full text-[11px] font-bold flex items-center justify-center border-2 ${
-                        pos >= 0 ? "bg-navy text-white border-white" : "bg-white/90 text-gray-500 border-gray-300"
-                      }`}
-                    >
-                      {pos >= 0 ? pos + 1 : ""}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={f.url} alt="" className="w-full aspect-square object-cover" />
+                  {pos >= 0 && (
+                    <span className="absolute top-1 left-1 w-5 h-5 rounded-full bg-navy text-white text-[11px] font-bold flex items-center justify-center">
+                      {pos + 1}
                     </span>
-                  </button>
-                  <p className="text-[11px] text-gray-600 leading-tight">
-                    <b>{nombreDeIA(t.modelo)}</b> ·{" "}
-                    {new Date(t.createdAt).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}
-                    {m.aprobado && <span className="text-green-700"> · ✓ aprobada</span>}
-                  </p>
-                  {m.tipo === "FOTO" && cfActivo && (
-                    <button
-                      type="button"
-                      onClick={() => masComoEsta(t)}
-                      disabled={ocupado !== null || enviando}
-                      className="rounded-md border border-green-600 text-green-800 bg-green-50 text-xs font-semibold px-2 py-1 hover:bg-green-100 disabled:opacity-50"
-                    >
-                      {ocupado === `variar-${t.id}` ? "Buscando opciones..." : "↻ Más opciones como esta"}
-                    </button>
                   )}
-                  <div className="flex items-center justify-between gap-1">
-                    <button
-                      type="button"
-                      onClick={() => usarResultados([m])}
-                      disabled={ocupado !== null}
-                      className="text-xs font-semibold text-navy underline disabled:opacity-50"
-                    >
-                      {ocupado === m.id ? "Preparando..." : "Publicar sola"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => descartar(m)}
-                      disabled={ocupado !== null}
-                      className="text-xs text-red-600 underline disabled:opacity-50"
-                    >
-                      Descartar
-                    </button>
-                  </div>
-                </div>
+                </button>
               );
             })}
           </div>
+          <p className="text-xs text-gray-500">
+            El número indica el orden. En un video, la foto 1 es el inicio.
+          </p>
+          <Navegacion
+            onAtras={() => irA(2)}
+            onSiguiente={() => irA(4)}
+            deshabilitado={seleccion.length === 0}
+            aviso={seleccion.length === 0 ? "Marcá al menos una foto." : null}
+          />
+        </>
+      )}
 
-          {elegidas.length > 0 && (
-            <div className="sticky bottom-2 rounded-lg bg-navy text-white p-3 flex flex-wrap items-center justify-between gap-2 shadow-lg">
-              <span className="text-sm">
-                {elegidas.length} elegida{elegidas.length === 1 ? "" : "s"}
-                {mezclaTipos && " · no se pueden mezclar fotos y videos"}
-                {variosVideos && " · elegí un solo video"}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setElegidas([])}
-                  className="text-xs underline text-white/80"
-                >
-                  Limpiar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => usarResultados(mediasElegidas)}
-                  disabled={ocupado !== null || mezclaTipos || variosVideos}
-                  className="rounded-md bg-gold text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
-                >
-                  {ocupado && ocupado !== "actualizar" && !ocupado.startsWith("variar-")
-                    ? "Preparando..."
-                    : elegidas.length > 1
-                    ? `Publicar las ${elegidas.length} juntas (carrusel)`
-                    : "Publicar"}
-                </button>
+      {/* Paso 4 · Qué hacer y modelo */}
+      {paso === 4 && (
+        <>
+          <p className="text-sm font-semibold text-navy">¿Qué querés hacer?</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {tareas.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTareaId(t.id)}
+                className={`text-left rounded-lg border-2 p-2.5 transition ${
+                  tarea.id === t.id ? "border-navy bg-navy/5" : "border-gray-200 hover:border-gray-400"
+                }`}
+              >
+                <span className="text-lg leading-none">{t.icono}</span>
+                <span className="block text-sm font-semibold text-gray-900 mt-1">
+                  {t.recomendada && "⭐ "}
+                  {t.nombre}
+                </span>
+                <span className="block text-[10px] uppercase tracking-wide text-gray-400 mt-0.5">
+                  {t.modo === "FOTO" ? "Foto" : "Video"}
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500">{tarea.ayuda}</p>
+          {!panelVideo && seleccion.length > 4 && (
+            <p className="text-xs text-amber-700">
+              Esta edición usa hasta 4 fotos: se toman las primeras 4 que marcaste.
+            </p>
+          )}
+          {usaPersona && (
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">Modelo · ¿quién aparece?</p>
+              <div className="flex flex-wrap gap-2">
+                {PERSONAS.filter((p) => p.id !== "ninguna").map((p) => (
+                  <Chip key={p.id} activo={persona === p.id} onClick={() => setPersona(p.id)}>
+                    {p.nombre}
+                  </Chip>
+                ))}
               </div>
+              <p className="text-xs text-gray-500 mt-1.5">
+                Siempre son personas adultas creadas por IA, que no existen.
+              </p>
             </div>
           )}
-          <p className="text-[11px] text-gray-500">
-            En el paso de publicar también podés sumar al carrusel las fotos originales del producto.
+
+          {usaEscena && (
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">Lugar / ambiente</p>
+              <div className="flex flex-wrap gap-2">
+                {ESCENAS.map((e) => (
+                  <Chip key={e.id} activo={escena === e.id} onClick={() => setEscena(e.id)}>
+                    {e.nombre}
+                  </Chip>
+                ))}
+              </div>
+              {escena === "personalizada" && (
+                <input
+                  value={escenaPersonalizada}
+                  onChange={(e) => setEscenaPersonalizada(e.target.value)}
+                  placeholder="Describilo (podés escribir en español): ej. un festival de música al aire libre"
+                  className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                />
+              )}
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">
+              {modo === "FOTO" ? "Formato" : panelVideo ? "Segundos por foto" : "Duración"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {panelVideo
+                ? [2, 3, 4, 5].map((d) => (
+                    <Chip key={d} activo={segFoto === d} onClick={() => setSegFoto(d)}>
+                      {d} s
+                    </Chip>
+                  ))
+                : modo === "FOTO"
+                ? FORMATOS.map((f) => (
+                    <Chip key={f.id} activo={formato === f.id} onClick={() => setFormato(f.id)}>
+                      {f.nombre}
+                    </Chip>
+                  ))
+                : [5, 10].map((d) => (
+                    <Chip key={d} activo={duracion === d} onClick={() => setDuracion(d as 5 | 10)}>
+                      {d} segundos
+                    </Chip>
+                  ))}
+            </div>
+            {panelVideo && (
+              <p className="text-xs text-gray-500 mt-1">
+                El video dura {duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })}{" "}
+                segundos con {seleccionadas.length} foto{seleccionadas.length === 1 ? "" : "s"}
+                {cierre ? " y la placa final" : ""}.
+              </p>
+            )}
+          </div>
+
+          {modo === "FOTO" && (fotoTipo === "pack" || fotoTipo === "escena") && (
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">
+                Estilo de publicidad · marcá hasta {MAX_ESTILOS} y sale una foto por cada uno
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {ESTILOS.map((e) => {
+                  const activo = estilos.includes(e.id);
+                  return (
+                    <Chip
+                      key={e.id}
+                      activo={activo}
+                      onClick={() =>
+                        setEstilos((prev) =>
+                          activo
+                            ? prev.length > 1
+                              ? prev.filter((x) => x !== e.id)
+                              : prev
+                            : prev.length >= MAX_ESTILOS
+                            ? [...prev.slice(1), e.id]
+                            : [...prev, e.id]
+                        )
+                      }
+                    >
+                      {activo ? "✓ " : ""}
+                      {e.nombre}
+                    </Chip>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {fotoTipo === "pack"
+                  ? `Salen ${cantidadFotos} fotos: el producto real solo y una con modelo por cada estilo.`
+                  : `Salen ${cantidadFotos} foto${cantidadFotos === 1 ? "" : "s"}, una por estilo.`}
+              </p>
+            </div>
+          )}
+
+          <Navegacion
+            onAtras={() => irA(3)}
+            onSiguiente={() => irA(5)}
+            deshabilitado={Boolean(problemaOpciones)}
+            aviso={problemaOpciones}
+          />
+        </>
+      )}
+
+      {/* Paso 5 · IA */}
+      {paso === 5 && (
+        <>
+          {(modo === "FOTO" || panelVideo) && (
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">
+                ⭐ Gratis dentro de tu panel
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {modo === "VIDEO" ? (
+                  <TarjetaIA
+                    activa={eleccion.clase === "panel"}
+                    onClick={() => elegirIA({ clase: "panel", id: VIDEO_PANEL.id })}
+                    nombre={VIDEO_PANEL.nombre}
+                    empresa={VIDEO_PANEL.empresa}
+                    detalle={VIDEO_PANEL.detalle}
+                    etiqueta="Gratis"
+                    recomendada
+                  />
+                ) : (
+                  MODELOS_GRATIS.map((m) => (
+                    <TarjetaIA
+                      key={m.id}
+                      activa={eleccion.clase === "panel" && modeloGratis.id === m.id}
+                      onClick={() => elegirIA({ clase: "panel", id: m.id })}
+                      nombre={m.nombre}
+                      empresa={m.empresa}
+                      detalle={`${m.nota} ${m.porDia}.`}
+                      etiqueta="Gratis"
+                      recomendada={m.recomendado}
+                      apagada={!cfActivo}
+                    />
+                  ))
+                )}
+              </div>
+              {modo === "FOTO" && !cfActivo && (
+                <p className="text-[11px] text-amber-700 mt-1.5">
+                  Para usarlas conectá la IA gratis en el Paso 1 · Conectar IAs.
+                </p>
+              )}
+            </div>
+          )}
+          {falActivo && (modo === "FOTO" || !panelVideo) ? (
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">
+                Paga · la hace el panel solo, con un clic
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {modelos.map((m) => (
+                  <TarjetaIA
+                    key={m.id}
+                    activa={eleccion.clase === "paga" && modelo.id === m.id}
+                    onClick={() => elegirIA({ clase: "paga", id: m.id })}
+                    nombre={m.nombre}
+                    empresa={m.empresa}
+                    detalle={m.nota}
+                    etiqueta={costoTexto(m, modo, duracion, cantidadFotos)}
+                    recomendada={false}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : (
+            !falActivo && (
+              <p className="text-[11px] text-gray-500">
+                ¿Querés videos con una persona usando el artículo? Son con IA paga: conectala (opcional)
+                en el Paso 1 · Conectar IAs.
+              </p>
+            )
+          )}
+          {/* Vista previa de lo que va a hacer la IA elegida */}
+          <VistaPreviaIA
+            modo={modo}
+            fotoTipo={fotoTipo}
+            videoTipo={videoTipo}
+            fotos={seleccionadas}
+            escena={escena}
+            persona={persona}
+            formato={formato}
+            duracion={
+              panelVideo
+                ? duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })
+                : duracion
+            }
+            texto={texto.trim()}
+            textoPos={textoPos}
+            nombreIA={
+              eleccion.clase === "panel" ? nombrePanel : eleccion.clase === "gratis" ? herramienta.nombre : modelo.nombre
+            }
+            etiquetaIA={eleccion.clase === "paga" ? costo : eleccion.clase === "panel" ? "Gratis en tu panel" : "Gratis"}
+            gratis={eleccion.clase !== "paga"}
+            videoConFotos={modo === "VIDEO" && eleccion.clase === "panel"}
+            estilos={ESTILOS.filter((e) => estilos.includes(e.id))}
+          />
+          <Navegacion
+            onAtras={() => irA(4)}
+            onSiguiente={() => irA(6)}
+            deshabilitado={Boolean(problemaIA)}
+            aviso={problemaIA}
+          />
+        </>
+      )}
+
+      {/* Paso 6 · Observaciones y hacerlo */}
+      {paso === 6 && (
+        <>
+          {esUgc && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-medium text-gray-700">¿Qué hace la persona con tu artículo?</p>
+              <div className="flex flex-wrap gap-2">
+                {ACCIONES_UGC.map((a) => (
+                  <Chip key={a.id} activo={accion === a.id} onClick={() => setAccion(a.id)}>
+                    {a.nombre}
+                  </Chip>
+                ))}
+              </div>
+              <textarea
+                value={detalle}
+                onChange={(e) => setDetalle(e.target.value.slice(0, 400))}
+                rows={3}
+                placeholder="Contale a la IA qué querés ver, en tus palabras. Ej.: una chica se arma una colita alta con la colita de pelo y sonríe a cámara · un chico juega con la pelota en la plaza · se pone la remera y muestra cómo le queda"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+              />
+              <p className="text-xs text-gray-500">
+                Para que salga mejor elegí como base una foto donde el artículo se vea claro.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">
+              Texto escrito {modo === "FOTO" ? "sobre la foto" : "en el video"} (opcional)
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                value={texto}
+                onChange={(e) => setTexto(e.target.value.slice(0, 80))}
+                placeholder="Ej.: NUEVO INGRESO · Consultá precio"
+                className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+              />
+              <div className="flex gap-2">
+                <Chip activo={textoPos === "arriba"} onClick={() => setTextoPos("arriba")}>
+                  Arriba
+                </Chip>
+                <Chip activo={textoPos === "abajo"} onClick={() => setTextoPos("abajo")}>
+                  Abajo
+                </Chip>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 mt-1.5">
+              {[producto, "Nuevo ingreso", "Consultá precio", "www.soloventas.com.ar"].map((t) => (
+                <Chip key={t} activo={texto === t} onClick={() => setTexto(texto === t ? "" : t)}>
+                  {t}
+                </Chip>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {panelVideo
+                ? "Aparece animado sobre las fotos, con la animación que elijas abajo."
+                : "La IA lo escribe tal cual, en letra grande y sin tapar el producto."}{" "}
+              Dejalo vacío si no querés texto.
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">
+              Observaciones para la edición (opcional)
+            </p>
+            <textarea
+              value={extra}
+              onChange={(e) => setExtra(e.target.value.slice(0, 400))}
+              rows={3}
+              placeholder="Escribí qué querés que haga con este artículo. Ej.: luz de atardecer, tonos pastel, que se vea bien el logo, fondo con palmeras"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+            />
+          </div>
+          {panelVideo && (
+            <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <p className="text-sm font-semibold text-navy">🎬 Edición del video</p>
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-1.5">Transición entre fotos</p>
+                <div className="flex flex-wrap gap-2">
+                  {TRANSICIONES.map((t) => (
+                    <Chip key={t.id} activo={transicion === t.id} onClick={() => setTransicion(t.id)}>
+                      {t.nombre}
+                    </Chip>
+                  ))}
+                  <Chip activo={movimiento} onClick={() => setMovimiento((v) => !v)}>
+                    {movimiento ? "✓ " : ""}Movimiento suave
+                  </Chip>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-1.5">Animación del texto</p>
+                <div className="flex flex-wrap gap-2">
+                  {ESTILOS_TEXTO.map((t) => (
+                    <Chip key={t.id} activo={estiloTexto === t.id} onClick={() => setEstiloTexto(t.id)}>
+                      {t.nombre}
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-1.5">Segundo texto (opcional)</p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    value={texto2}
+                    onChange={(e) => setTexto2(e.target.value.slice(0, 80))}
+                    placeholder="Ej.: Consultanos ahora"
+                    className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                  />
+                  <div className="flex gap-2">
+                    {(["arriba", "centro", "abajo"] as PosTexto[]).map((p) => (
+                      <Chip key={p} activo={texto2Pos === p} onClick={() => setTexto2Pos(p)}>
+                        {p[0].toUpperCase() + p.slice(1)}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-1.5">Sticker</p>
+                <div className="flex flex-wrap gap-2">
+                  <Chip activo={sticker === null} onClick={() => setSticker(null)}>
+                    Sin sticker
+                  </Chip>
+                  {STICKERS.map((st) => (
+                    <Chip key={st.id} activo={sticker === st.id} onClick={() => setSticker(st.id)}>
+                      {st.texto}
+                    </Chip>
+                  ))}
+                </div>
+                {sticker && (
+                  <div className="flex flex-wrap gap-2 mt-1.5">
+                    {(
+                      [
+                        ["arriba-izq", "↖ Arriba izq."],
+                        ["arriba-der", "↗ Arriba der."],
+                        ["abajo-izq", "↙ Abajo izq."],
+                        ["abajo-der", "↘ Abajo der."],
+                      ] as [PosSticker, string][]
+                    ).map(([p, n]) => (
+                      <Chip key={p} activo={stickerPos === p} onClick={() => setStickerPos(p)}>
+                        {n}
+                      </Chip>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-1.5">Música de fondo (opcional)</p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-navy cursor-pointer hover:bg-gray-100">
+                    {musica ? "Cambiar canción" : "🎵 Elegir canción"}
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      onChange={(e) => setMusica(e.target.files?.[0] || null)}
+                    />
+                  </label>
+                  {musica && (
+                    <>
+                      <span className="text-xs text-gray-700 truncate max-w-[12rem]">{musica.name}</span>
+                      <label className="flex items-center gap-2 text-xs text-gray-700">
+                        Volumen
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={1}
+                          step={0.1}
+                          value={volumen}
+                          onChange={(e) => setVolumen(Number(e.target.value))}
+                        />
+                      </label>
+                      <button type="button" onClick={() => setMusica(null)} className="text-xs text-red-600 underline">
+                        Quitar
+                      </button>
+                    </>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Usá música que tengas derecho a usar (por ejemplo, de la biblioteca de audio libre de
+                  YouTube). Al publicar en Instagram o TikTok también podés sumar un sonido de la app.
+                </p>
+              </div>
+              <Chip activo={cierre} onClick={() => setCierre((v) => !v)}>
+                {cierre ? "✓ " : ""}Placa final con tu marca (SOLO VENTAS · web · Consultanos ahora)
+              </Chip>
+            </div>
+          )}
+
+
+          {problema && <p className="text-sm text-amber-700">{problema}</p>}
+
+          {/* 5. Hacerlo */}
+          {eleccion.clase === "panel" ? (
+            <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
+              <p className="text-sm font-semibold text-green-900">
+                Hacelo gratis acá mismo con {nombrePanel}
+              </p>
+              {modo === "FOTO" ? (
+                cfActivo ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={generarGratis}
+                      disabled={Boolean(problema) || enviando}
+                      className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                    >
+                      {enviando
+                        ? "Generando..."
+                        : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
+                            cantidadFotos > 1 ? `Generar ${cantidadFotos} fotos gratis` : "Generar foto gratis"
+                          }`}
+                    </button>
+                    <span className="text-xs text-green-900">
+                      Gratis · {modeloGratis.porDia} · tarda unos segundos
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-sm text-green-900">
+                    Falta conectar la IA gratis: hacelo en el <b>Paso 1 · Conectar IAs</b> (es
+                    una sola vez).
+                  </p>
+                )
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={armarVideoGratis}
+                      disabled={Boolean(problema) || progreso !== null || enviando}
+                      className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                    >
+                      {progreso !== null
+                        ? `Armando video... ${progreso}%`
+                        : borradores.length > 0
+                        ? "Armar otra versión"
+                        : "Armar video gratis"}
+                    </button>
+                    <span className="text-xs text-green-900">
+                      Gratis ·{" "}
+                      {duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })}{" "}
+                      segundos{musica ? " con música" : ""}, vertical para
+                      Reels y TikTok · dejá esta pestaña abierta mientras se arma
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : eleccion.clase === "gratis" ? (
+            <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-green-900">
+                  Hacelo gratis con {herramienta.nombre}
+                </p>
+                <a
+                  href={herramienta.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-md bg-green-700 text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90"
+                >
+                  Abrir {herramienta.nombre} ↗
+                </a>
+              </div>
+              <ol className="text-sm text-green-950 list-decimal pl-5 flex flex-col gap-1">
+                <li>
+                  Guardá la foto de base:{" "}
+                  {seleccionadas.map((f, i) => (
+                    <a key={f.id} href={f.url} target="_blank" rel="noreferrer" className="underline mr-2">
+                      abrir foto {i + 1}
+                    </a>
+                  ))}
+                  (clic derecho → Guardar imagen).
+                </li>
+                <li>
+                  Copiá la instrucción de abajo y abrí {herramienta.nombre}. {pasos}
+                  {cantidadFotos > 1 && " Para cada foto, pegá su instrucción (1, 2, 3...)."}
+                </li>
+                <li>
+                  Descargá el resultado y subilo arriba en <b>Fotos y videos</b>, tildando{" "}
+                  <i>&quot;Son fotos o videos generados con IA&quot;</i>.
+                  {cantidadFotos > 1 && " Para publicarlas juntas elegí “Carrusel” en Publicar en redes."}
+                </li>
+              </ol>
+              {prompts.map((p, i) => (
+                <div key={p.titulo} className="flex flex-col gap-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-green-900">
+                      {prompts.length > 1 ? `Instrucción ${i + 1} · ` : ""}
+                      {p.titulo}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => copiar(i)}
+                      disabled={Boolean(problema)}
+                      className="rounded-md bg-white border border-green-700 text-green-800 text-xs font-semibold px-3 py-1.5 hover:bg-green-100 disabled:opacity-50"
+                    >
+                      {copiado === i ? "✓ Copiada" : `Copiar instrucción${prompts.length > 1 ? ` ${i + 1}` : ""}`}
+                    </button>
+                  </div>
+                  <textarea
+                    readOnly
+                    value={p.prompt}
+                    rows={3}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="w-full rounded-md border border-green-200 bg-white px-3 py-2 text-xs text-gray-700 font-mono"
+                  />
+                </div>
+              ))}
+              <p className="text-xs text-green-900/80">
+                La instrucción va en inglés porque las IA la entienden mejor. Si el resultado cambia el
+                producto, pedile en el mismo chat: &quot;keep the product exactly as in the original
+                photo&quot;.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-4 flex flex-col gap-3">
+              <p className="text-sm font-semibold text-violet-900">
+                Hacelo automático con {modelo.nombre}
+              </p>
+              {falActivo ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={generar}
+                    disabled={Boolean(problema) || enviando}
+                    className="rounded-md bg-violet-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                  >
+                    {enviando
+                      ? "Enviando..."
+                      : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
+                          modo === "FOTO" ? (cantidadFotos > 1 ? `Generar ${cantidadFotos} fotos` : "Generar foto") : "Generar video"
+                        }`}
+                  </button>
+                  <span className="text-xs text-violet-900">
+                    Costo: {costo}
+                    {modo === "VIDEO" ? " · tarda 1 a 5 minutos" : " · tarda unos segundos"}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-sm text-violet-900">
+                  Para usarla, conectá fal.ai en el <b>Paso 1 · Conectar IAs</b> (opcional, pago
+                  por uso).
+                </p>
+              )}
+            </div>
+          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <Navegacion
+            onAtras={() => irA(5)}
+            onSiguiente={resultados.length > 0 || borradores.length > 0 ? () => irA(7) : undefined}
+            siguiente="Ver resultados anteriores →"
+          />
+        </>
+      )}
+
+      {/* Paso 7 · Resultado */}
+      {paso === 7 && (
+        <>
+            {borradores.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {borradores.map((b, i) => (
+                  <div key={b.clave} className="flex flex-col gap-1.5">
+                    <video
+                      src={b.url}
+                      controls
+                      muted={!b.conMusica}
+                      playsInline
+                      autoPlay={i === 0 && !b.conMusica}
+                      className="w-full rounded-md bg-black"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => guardarVideo(b)}
+                      disabled={enviando}
+                      className="rounded-md bg-navy text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90 disabled:opacity-50"
+                    >
+                      {enviando ? "Guardando..." : "Me gusta, guardarlo"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => quitarBorrador(b.clave)}
+                      className="text-xs text-red-600 underline"
+                    >
+                      Quitar
+                    </button>
+                    {b.extension === "webm" && (
+                      <span className="text-[11px] text-amber-700">
+                        Salió en WebM: para Instagram armalo desde Chrome actualizado (MP4).
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          {ultimos.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-semibold text-navy">
+                {nuevos.length > 0 ? "Lo que acabás de hacer" : "Tus últimas versiones"}
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {ultimos.map((t) => (
+                  <div key={t.media!.id} className="flex flex-col gap-1">
+                    {t.media!.tipo === "FOTO" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.media!.url} alt="" className="w-full aspect-[4/5] rounded-md object-cover bg-gray-50" />
+                    ) : (
+                      <video src={t.media!.url} muted playsInline controls className="w-full aspect-[4/5] rounded-md bg-black object-cover" />
+                    )}
+                    <p className="text-[11px] text-gray-600">
+                      <b>{nombreDeIA(t.modelo)}</b> ·{" "}
+                      {new Date(t.createdAt).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            borradores.length === 0 &&
+            !hayPendientes && (
+              <p className="text-sm text-gray-600">
+                Todavía no hay resultados. Volvé al paso 6 y tocá el botón para hacer la edición.
+              </p>
+            )
+          )}
+          {otrosTrabajos.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-xs font-semibold text-gray-700">Pedidos a la IA</p>
+              <ul className="flex flex-col gap-1.5">
+                {otrosTrabajos.map((t) => (
+                  <li key={t.id} className="text-sm flex flex-wrap items-center gap-x-3">
+                    <span className="font-medium">{t.tipo === "FOTO" ? "Foto" : "Video"}</span>
+                    <span className="text-xs text-gray-500">
+                      {new Date(t.createdAt).toLocaleString("es-AR", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </span>
+                    {t.estado === "PENDIENTE" && (
+                      <span className="text-xs font-semibold text-amber-600">Generando...</span>
+                    )}
+                    {t.estado === "LISTO" && (
+                      <span className="text-xs text-gray-500">Listo (el archivo ya no está)</span>
+                    )}
+                    {t.estado === "ERROR" && (
+                      <span className="text-xs text-red-600">No se pudo: {t.error}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {hayPendientes && (
+            <p className="text-sm text-amber-700">
+              La IA está trabajando. Esta pantalla se actualiza sola cuando termina.
+            </p>
+          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <Navegacion
+            onAtras={() => irA(6)}
+            onSiguiente={() => irA(8)}
+            siguiente="Revisar y publicar →"
+            deshabilitado={resultados.length === 0}
+            aviso={
+              resultados.length === 0 && borradores.length > 0
+                ? "Si te gusta el video, tocá “Me gusta, guardarlo” para seguir."
+                : null
+            }
+          />
+        </>
+      )}
+
+      {/* Paso 8 · Revisar y publicar */}
+      {paso === 8 && (
+        <>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 flex flex-col gap-2">
+            <p className="text-sm font-semibold text-navy">¿No te convenció?</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={hacerDeNuevo}
+                disabled={Boolean(problema) || enviando || progreso !== null || eleccion.clase === "gratis"}
+                className="rounded-md bg-navy text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90 disabled:opacity-50"
+              >
+                {enviando || progreso !== null ? "Haciendo..." : "↻ Hacerlo de nuevo igual"}
+              </button>
+              <button
+                type="button"
+                onClick={() => irA(4)}
+                className="rounded-md border border-gray-300 bg-white text-gray-700 text-xs font-semibold px-3 py-1.5 hover:border-navy"
+              >
+                Cambiar qué hacer o modelo
+              </button>
+              <button
+                type="button"
+                onClick={() => irA(5)}
+                className="rounded-md border border-gray-300 bg-white text-gray-700 text-xs font-semibold px-3 py-1.5 hover:border-navy"
+              >
+                Cambiar IA
+              </button>
+              <button
+                type="button"
+                onClick={() => irA(6)}
+                className="rounded-md border border-gray-300 bg-white text-gray-700 text-xs font-semibold px-3 py-1.5 hover:border-navy"
+              >
+                Cambiar observaciones o textos
+              </button>
+            </div>
+          </div>
+            {borradores.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {borradores.map((b, i) => (
+                  <div key={b.clave} className="flex flex-col gap-1.5">
+                    <video
+                      src={b.url}
+                      controls
+                      muted={!b.conMusica}
+                      playsInline
+                      autoPlay={i === 0 && !b.conMusica}
+                      className="w-full rounded-md bg-black"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => guardarVideo(b)}
+                      disabled={enviando}
+                      className="rounded-md bg-navy text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90 disabled:opacity-50"
+                    >
+                      {enviando ? "Guardando..." : "Me gusta, guardarlo"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => quitarBorrador(b.clave)}
+                      className="text-xs text-red-600 underline"
+                    >
+                      Quitar
+                    </button>
+                    {b.extension === "webm" && (
+                      <span className="text-[11px] text-amber-700">
+                        Salió en WebM: para Instagram armalo desde Chrome actualizado (MP4).
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          {resultados.length > 0 && (
+            <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-navy">
+                    Así quedó · {resultados.length} versión{resultados.length === 1 ? "" : "es"}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Tocá &quot;Más opciones como esta&quot; en la que te guste, o probá otras IA o estilos
+                    arriba: cada versión nueva se suma acá y no se borra nada hasta que vos la descartes. Marcá las que te gusten (de cualquier IA) y publicalas
+                    juntas.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={actualizar}
+                  disabled={ocupado !== null}
+                  className="rounded-md border border-gray-300 text-gray-700 text-xs font-semibold px-3 py-1.5 hover:border-navy disabled:opacity-50"
+                >
+                  {ocupado === "actualizar" ? "Actualizando..." : "↻ Actualizar"}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {resultados.map((t) => {
+                  const m = t.media!;
+                  const pos = elegidas.indexOf(m.id);
+                  return (
+                    <div
+                      key={m.id}
+                      className={`rounded-lg border-2 p-1.5 flex flex-col gap-1.5 ${
+                        pos >= 0 ? "border-navy bg-navy/5" : "border-gray-200"
+                      }`}
+                    >
+                      <button type="button" onClick={() => alternarElegida(m.id)} className="relative block">
+                        {m.tipo === "FOTO" ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={m.url} alt="" className="w-full aspect-[4/5] rounded-md object-cover bg-gray-50" />
+                        ) : (
+                          <video
+                            src={m.url}
+                            muted
+                            playsInline
+                            controls
+                            className="w-full aspect-[4/5] rounded-md bg-black object-cover"
+                          />
+                        )}
+                        <span
+                          className={`absolute top-1.5 left-1.5 min-w-6 h-6 px-1 rounded-full text-[11px] font-bold flex items-center justify-center border-2 ${
+                            pos >= 0 ? "bg-navy text-white border-white" : "bg-white/90 text-gray-500 border-gray-300"
+                          }`}
+                        >
+                          {pos >= 0 ? pos + 1 : ""}
+                        </span>
+                      </button>
+                      <p className="text-[11px] text-gray-600 leading-tight">
+                        <b>{nombreDeIA(t.modelo)}</b> ·{" "}
+                        {new Date(t.createdAt).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}
+                        {m.aprobado && <span className="text-green-700"> · ✓ aprobada</span>}
+                      </p>
+                      {m.tipo === "FOTO" && cfActivo && (
+                        <button
+                          type="button"
+                          onClick={() => masComoEsta(t)}
+                          disabled={ocupado !== null || enviando}
+                          className="rounded-md border border-green-600 text-green-800 bg-green-50 text-xs font-semibold px-2 py-1 hover:bg-green-100 disabled:opacity-50"
+                        >
+                          {ocupado === `variar-${t.id}` ? "Buscando opciones..." : "↻ Más opciones como esta"}
+                        </button>
+                      )}
+                      <div className="flex items-center justify-between gap-1">
+                        <button
+                          type="button"
+                          onClick={() => usarResultados([m])}
+                          disabled={ocupado !== null}
+                          className="text-xs font-semibold text-navy underline disabled:opacity-50"
+                        >
+                          {ocupado === m.id ? "Preparando..." : "Publicar sola"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => descartar(m)}
+                          disabled={ocupado !== null}
+                          className="text-xs text-red-600 underline disabled:opacity-50"
+                        >
+                          Descartar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {elegidas.length > 0 && (
+                <div className="sticky bottom-2 rounded-lg bg-navy text-white p-3 flex flex-wrap items-center justify-between gap-2 shadow-lg">
+                  <span className="text-sm">
+                    {elegidas.length} elegida{elegidas.length === 1 ? "" : "s"}
+                    {mezclaTipos && " · no se pueden mezclar fotos y videos"}
+                    {variosVideos && " · elegí un solo video"}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setElegidas([])}
+                      className="text-xs underline text-white/80"
+                    >
+                      Limpiar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => usarResultados(mediasElegidas)}
+                      disabled={ocupado !== null || mezclaTipos || variosVideos}
+                      className="rounded-md bg-gold text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                    >
+                      {ocupado && ocupado !== "actualizar" && !ocupado.startsWith("variar-")
+                        ? "Preparando..."
+                        : elegidas.length > 1
+                        ? `Publicar las ${elegidas.length} juntas (carrusel)`
+                        : "Publicar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <p className="text-[11px] text-gray-500">
+                En el paso de publicar también podés sumar al carrusel las fotos originales del producto.
+              </p>
+            </div>
+          )}
+          {resultados.length === 0 && (
+            <p className="text-sm text-gray-600">
+              Todavía no hay resultados para publicar. Igual podés publicar las fotos originales
+              abajo.
+            </p>
+          )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <p className="text-xs text-gray-500">
+            Instagram, Facebook y TikTok pueden mostrar la etiqueta &quot;Hecho con IA&quot; en estas
+            publicaciones. Es normal: indica que la imagen fue creada con IA.
           </p>
-        </div>
+        </>
       )}
-
-      {otrosTrabajos.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <p className="text-xs font-semibold text-gray-700">Pedidos a la IA</p>
-          <ul className="flex flex-col gap-1.5">
-            {otrosTrabajos.map((t) => (
-              <li key={t.id} className="text-sm flex flex-wrap items-center gap-x-3">
-                <span className="font-medium">{t.tipo === "FOTO" ? "Foto" : "Video"}</span>
-                <span className="text-xs text-gray-500">
-                  {new Date(t.createdAt).toLocaleString("es-AR", {
-                    dateStyle: "short",
-                    timeStyle: "short",
-                  })}
-                </span>
-                {t.estado === "PENDIENTE" && (
-                  <span className="text-xs font-semibold text-amber-600">Generando...</span>
-                )}
-                {t.estado === "LISTO" && (
-                  <span className="text-xs text-gray-500">Listo (el archivo ya no está)</span>
-                )}
-                {t.estado === "ERROR" && (
-                  <span className="text-xs text-red-600">No se pudo: {t.error}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <p className="text-xs text-gray-500">
-        Instagram, Facebook y TikTok pueden mostrar la etiqueta &quot;Hecho con IA&quot; en estas
-        publicaciones. Es normal: indica que la imagen fue creada con IA.
-      </p>
     </div>
   );
 }
