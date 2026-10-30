@@ -220,6 +220,7 @@ export default function EstudioIA({
   irA,
   onNuevos,
   onPublicar,
+  onTextoPublicacion,
 }: {
   productoId: string;
   producto: string;
@@ -232,6 +233,8 @@ export default function EstudioIA({
   onNuevos: () => void | Promise<void>;
   // Lleva lo elegido al publicador (ya aprobado) para elegir redes y publicar.
   onPublicar?: (ids: string[], tipo: Modo) => void;
+  // Lo que se pidió para el texto de la publicación (lo usa el paso 8).
+  onTextoPublicacion?: (texto: string) => void;
 }) {
   const [tareaId, setTareaId] = useState(TAREAS[0].id);
   const [seleccion, setSeleccion] = useState<string[]>([]);
@@ -252,6 +255,10 @@ export default function EstudioIA({
   const [elegidas, setElegidas] = useState<string[]>([]);
   const [verTodas, setVerTodas] = useState(false);
   const [extra, setExtra] = useState("");
+  // Con varias fotos marcadas: una edición por cada foto, o todas juntas en una.
+  const [porSeparado, setPorSeparado] = useState(true);
+  const [textoPublicacion, setTextoPublicacion] = useState("");
+  const [avance, setAvance] = useState<string | null>(null);
   // Anuncio UGC: qué hace la persona y la descripción del vendedor.
   const [accion, setAccion] = useState<AccionUgcId>("auto");
   const [detalle, setDetalle] = useState("");
@@ -344,12 +351,15 @@ export default function EstudioIA({
     : herramientas.filter((h, i) => i < VISIBLES || (eleccion.clase === "gratis" && h.id === herramienta.id));
   const modelo = buscarModelo(modo, eleccion.clase === "paga" ? eleccion.id : undefined);
   const modeloGratis = MODELOS_GRATIS.find((m) => m.id === eleccion.id) || MODELOS_GRATIS[0];
-  const nombrePanel = modo === "VIDEO" ? VIDEO_PANEL.nombre : modeloGratis.nombre;
-  const cantidadFotos = modo === "FOTO" ? prompts.length : 0;
-  const costo = costoTexto(modelo, modo, duracion, cantidadFotos);
-
   // Las fotos que de verdad se usan con la tarea elegida.
   const usadas = panelVideo ? seleccion : seleccion.slice(0, MAX_FOTOS_IA);
+  // Grupos de fotos que se mandan a la IA: cada foto sola, o todas juntas.
+  const separar = modo === "FOTO" && porSeparado && usadas.length > 1;
+  const grupos = separar ? usadas.map((id) => [id]) : [usadas];
+  const nombrePanel = modo === "VIDEO" ? VIDEO_PANEL.nombre : modeloGratis.nombre;
+  const cantidadFotos = modo === "FOTO" ? prompts.length * grupos.length : 0;
+  const costo = costoTexto(modelo, modo, duracion, cantidadFotos);
+
   const seleccionadas = usadas
     .map((id) => fotos.find((f) => f.id === id))
     .filter((f): f is Media => Boolean(f));
@@ -435,20 +445,25 @@ export default function EstudioIA({
     const que =
       modo === "FOTO"
         ? cantidadFotos > 1
-          ? `${cantidadFotos} fotos (${prompts.map((p) => p.titulo.toLowerCase()).join(", ")})`
+          ? `${cantidadFotos} fotos (${prompts.map((p) => p.titulo.toLowerCase()).join(", ")}${
+              separar ? `, para cada una de las ${grupos.length} fotos` : ""
+            })`
           : `1 foto (${herramientaFoto.nombre.toLowerCase()})`
         : `un video de ${duracion} segundos`;
     if (!confirm(`¿Generar ${que} con ${modelo.nombre}? Costo: ${costo}.`)) return;
     setError("");
     setEnviando(true);
     setDesde(Date.now());
+    const lotes = modo === "FOTO" ? grupos : [usadas];
+    for (let i = 0; i < lotes.length; i++) {
+    if (lotes.length > 1) setAvance(`Foto ${i + 1} de ${lotes.length}...`);
     const r = await fetch("/api/ia/estudio", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         productoId,
         tipo: modo,
-        mediaIds: usadas,
+        mediaIds: lotes[i],
         modeloId: modelo.id,
         fotoTipo,
         escena,
@@ -466,11 +481,16 @@ export default function EstudioIA({
       }),
     });
     const data = await r.json().catch(() => ({}));
-    setEnviando(false);
     if (!r.ok) {
+      setEnviando(false);
+      setAvance(null);
       setError(data.error || "No se pudo enviar a la IA.");
+      if (i > 0) await cargarTrabajos();
       return;
     }
+    }
+    setEnviando(false);
+    setAvance(null);
     await cargarTrabajos();
     irA(7);
   }
@@ -481,7 +501,10 @@ export default function EstudioIA({
     setError("");
     setEnviando(true);
     setDesde(Date.now());
+    let hechas = 0;
     try {
+      for (let i = 0; i < grupos.length; i++) {
+      if (grupos.length > 1) setAvance(`Editando foto ${i + 1} de ${grupos.length}...`);
       const form = new FormData();
       form.append(
         "datos",
@@ -499,17 +522,25 @@ export default function EstudioIA({
           estilos,
         })
       );
-      const refs = await Promise.all(seleccionadas.map((f) => achicarFoto(f.url)));
-      refs.forEach((b, i) => form.append(`ref_${i}`, b, `ref${i}.jpg`));
+      const fotosGrupo = grupos[i]
+        .map((id) => fotos.find((f) => f.id === id))
+        .filter((f): f is Media => Boolean(f));
+      const refs = await Promise.all(fotosGrupo.map((f) => achicarFoto(f.url)));
+      refs.forEach((b, j) => form.append(`ref_${j}`, b, `ref${j}.jpg`));
       const r = await fetch("/api/ia/gratis", { method: "POST", body: form });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || "La IA gratis no pudo generar la foto.");
-      if (data.aviso) setError(data.aviso);
+      hechas++;
+      if (data.aviso) throw new Error(data.aviso);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "La IA gratis no pudo generar la foto.");
+    }
+    setAvance(null);
+    if (hechas > 0) {
       await cargarTrabajos();
       await onNuevos();
       irA(7);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "La IA gratis no pudo generar la foto.");
     }
     setEnviando(false);
   }
@@ -775,6 +806,26 @@ export default function EstudioIA({
             ))}
           </div>
           <p className="text-xs text-gray-500">{tarea.ayuda}</p>
+          {modo === "FOTO" && Math.min(seleccion.length, MAX_FOTOS_IA) > 1 && (
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">
+                Marcaste {Math.min(seleccion.length, MAX_FOTOS_IA)} fotos · ¿cómo las usa la IA?
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Chip activo={porSeparado} onClick={() => setPorSeparado(true)}>
+                  Editar cada foto por separado
+                </Chip>
+                <Chip activo={!porSeparado} onClick={() => setPorSeparado(false)}>
+                  Juntar todas en una sola imagen
+                </Chip>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {porSeparado
+                  ? `Sale una edición por cada foto: en total ${cantidadFotos} fotos nuevas.`
+                  : "La IA mira todas las fotos juntas para entender mejor el producto y arma una edición."}
+              </p>
+            </div>
+          )}
           {!panelVideo && seleccion.length > 4 && (
             <p className="text-xs text-amber-700">
               Esta edición usa hasta 4 fotos: se toman las primeras 4 que marcaste.
@@ -1062,15 +1113,34 @@ export default function EstudioIA({
 
           <div>
             <p className="text-xs font-medium text-gray-700 mb-1.5">
-              Observaciones para la edición (opcional)
+              ¿Qué querés que cambie en la foto? (opcional)
             </p>
             <textarea
               value={extra}
               onChange={(e) => setExtra(e.target.value.slice(0, 400))}
               rows={3}
-              placeholder="Escribí qué querés que haga con este artículo. Ej.: luz de atardecer, tonos pastel, que se vea bien el logo, fondo con palmeras"
+              placeholder="Escribí lo que la IA tiene que hacer en la imagen. Ej.: fondo de playa al atardecer, tonos pastel, que se vea bien el logo, la modelo sonriendo"
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
             />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">
+              Descripción y detalles para la publicación (opcional)
+            </p>
+            <textarea
+              value={textoPublicacion}
+              onChange={(e) => {
+                const v = e.target.value.slice(0, 400);
+                setTextoPublicacion(v);
+                onTextoPublicacion?.(v);
+              }}
+              rows={2}
+              placeholder="Ej.: describí el producto, que es ideal para regalar, enfocalo en revendedores"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Esto no va en la foto: lo usa la IA de textos en el paso 8 para escribir la publicación.
+            </p>
           </div>
           {panelVideo && (
             <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
@@ -1207,7 +1277,7 @@ export default function EstudioIA({
                       className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
                     >
                       {enviando
-                        ? "Generando..."
+                        ? avance || "Generando..."
                         : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
                             cantidadFotos > 1 ? `Generar ${cantidadFotos} fotos gratis` : "Generar foto gratis"
                           }`}
@@ -1327,7 +1397,7 @@ export default function EstudioIA({
                     className="rounded-md bg-violet-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
                   >
                     {enviando
-                      ? "Enviando..."
+                      ? avance || "Enviando..."
                       : `${resultados.length > 0 ? "↻ Otra versión: " : ""}${
                           modo === "FOTO" ? (cantidadFotos > 1 ? `Generar ${cantidadFotos} fotos` : "Generar foto") : "Generar video"
                         }`}
@@ -1482,7 +1552,7 @@ export default function EstudioIA({
                 disabled={Boolean(problema) || enviando || progreso !== null || eleccion.clase === "gratis"}
                 className="rounded-md bg-navy text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90 disabled:opacity-50"
               >
-                {enviando || progreso !== null ? "Haciendo..." : "↻ Hacerlo de nuevo igual"}
+                {enviando || progreso !== null ? avance || "Haciendo..." : "↻ Hacerlo de nuevo igual"}
               </button>
               <button
                 type="button"
