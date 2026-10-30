@@ -29,6 +29,7 @@ export default function Asistente({
     id: string;
     nombre: string;
     codigo: string;
+    descripcion: string | null;
     media: Media[];
     redes: { instagram: string | null; facebook: string | null; tiktok: string | null };
   } | null;
@@ -190,6 +191,7 @@ export default function Asistente({
               key={elegido.id}
               productoId={elegido.id}
               producto={elegido.nombre}
+              descripcion={elegido.descripcion ?? ""}
               inicial={elegido.media}
               redes={elegido.redes}
               iaActiva={iaActiva}
