@@ -44,6 +44,7 @@ export default function Publicador({
   redes,
   iaActiva,
   preseleccion,
+  indicacionesIniciales = "",
 }: {
   productoId: string;
   media: Media[];
@@ -51,6 +52,8 @@ export default function Publicador({
   iaActiva: boolean;
   // Archivos elegidos desde el Estudio IA para publicar.
   preseleccion?: { ids: string[]; tipo: "FOTO" | "VIDEO"; clave: number } | null;
+  // Lo que se escribió en Edición (paso 6) para el texto de la publicación.
+  indicacionesIniciales?: string;
 }) {
   const fotos = useMemo(() => media.filter((m) => m.tipo === "FOTO"), [media]);
   const videos = useMemo(() => media.filter((m) => m.tipo === "VIDEO"), [media]);
@@ -65,7 +68,7 @@ export default function Publicador({
   });
   const [texto, setTexto] = useState("");
   const [incluirPrecio, setIncluirPrecio] = useState(true);
-  const [indicaciones, setIndicaciones] = useState("");
+  const [indicaciones, setIndicaciones] = useState(indicacionesIniciales);
   const [generando, setGenerando] = useState(false);
   const [publicando, setPublicando] = useState(false);
   const [error, setError] = useState("");
