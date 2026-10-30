@@ -274,8 +274,9 @@ export default function EstudioIA({
   const [elegidas, setElegidas] = useState<string[]>([]);
   const [verTodas, setVerTodas] = useState(false);
   const [extra, setExtra] = useState("");
-  // Con varias fotos marcadas: una edición por cada foto, o todas juntas en una.
-  const [porSeparado, setPorSeparado] = useState(true);
+  // Con varias fotos marcadas: cada una se edita por separado y, si querés,
+  // después se juntan las editadas en una sola imagen (collage).
+  const [porSeparado, setPorSeparado] = useState(false);
   const [textoPublicacion, setTextoPublicacion] = useState("");
   const [avance, setAvance] = useState<string | null>(null);
   // Detalles escritos sobre la foto por el panel (uno por renglón).
@@ -390,10 +391,15 @@ export default function EstudioIA({
   // Las fotos que de verdad se usan con la tarea elegida.
   const usadas = panelVideo ? seleccion : seleccion.slice(0, MAX_FOTOS_IA);
   // Grupos de fotos que se mandan a la IA: cada foto sola, o todas juntas.
-  const separar = modo === "FOTO" && !esCollage && porSeparado && usadas.length > 1;
+  const separar = modo === "FOTO" && !esCollage && usadas.length > 1;
+  const juntarDespues = separar && !porSeparado;
   const grupos = separar ? usadas.map((id) => [id]) : [usadas];
   const nombrePanel = modo === "VIDEO" ? VIDEO_PANEL.nombre : modeloGratis.nombre;
-  const cantidadFotos = esCollage ? 1 : modo === "FOTO" ? prompts.length * grupos.length : 0;
+  const cantidadFotos = esCollage
+    ? 1
+    : modo === "FOTO"
+    ? prompts.length * grupos.length + (juntarDespues ? 1 : 0)
+    : 0;
   const costo = costoTexto(modelo, modo, duracion, cantidadFotos);
 
   const seleccionadas = usadas
@@ -601,6 +607,8 @@ export default function EstudioIA({
     setEnviando(true);
     setDesde(Date.now());
     let hechas = 0;
+    // Para juntar después: la primera foto editada de cada foto de base.
+    const paraJuntar: string[] = [];
     try {
       for (let i = 0; i < grupos.length; i++) {
       if (grupos.length > 1) setAvance(`Editando foto ${i + 1} de ${grupos.length}...`);
@@ -630,13 +638,24 @@ export default function EstudioIA({
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || "La IA gratis no pudo generar la foto.");
       hechas++;
-      if (hayTexto(textoFoto)) {
-        const ids = ((data.trabajos || []) as { mediaId: string | null }[])
-          .map((t) => t.mediaId)
-          .filter((id): id is string => Boolean(id));
+      const ids = ((data.trabajos || []) as { mediaId: string | null }[])
+        .map((t) => t.mediaId)
+        .filter((id): id is string => Boolean(id));
+      if (juntarDespues) {
+        if (ids[0]) paraJuntar.push(ids[0]);
+      } else if (hayTexto(textoFoto)) {
         await escribirTexto(ids, textoFoto);
       }
       if (data.aviso) throw new Error(data.aviso);
+      }
+      if (juntarDespues && paraJuntar.length > 1) {
+        setAvance("Juntando las fotos editadas...");
+        const r = await fetch(`/api/ia/estudio?productoId=${productoId}`, { cache: "no-store" });
+        const lista: Trabajo[] = r.ok ? await r.json() : [];
+        const urls = paraJuntar
+          .map((id) => lista.find((t) => t.media?.id === id)?.media?.url)
+          .filter((u): u is string => Boolean(u));
+        await guardarCollage(urls);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "La IA gratis no pudo generar la foto.");
@@ -651,27 +670,28 @@ export default function EstudioIA({
   }
 
   // Collage gratis: junta las fotos reales en una, con el texto escrito por el panel.
+  async function guardarCollage(urls: string[]) {
+    let foto = await armarCollage(urls, formato);
+    if (hayTexto(textoFoto)) {
+      const temporal = URL.createObjectURL(foto);
+      foto = await ponerTextoEnFoto(temporal, textoFoto);
+      URL.revokeObjectURL(temporal);
+    }
+    const form = new FormData();
+    form.append("datos", JSON.stringify({ accion: "collage", productoId }));
+    form.append("foto", foto, "collage.jpg");
+    const r = await fetch("/api/ia/gratis", { method: "POST", body: form });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "No se pudo guardar el collage.");
+  }
+
   async function armarCollageGratis() {
     if (problema) return;
     setError("");
     setEnviando(true);
     setDesde(Date.now());
     try {
-      let foto = await armarCollage(
-        seleccionadas.map((f) => f.url),
-        formato
-      );
-      if (hayTexto(textoFoto)) {
-        const temporal = URL.createObjectURL(foto);
-        foto = await ponerTextoEnFoto(temporal, textoFoto);
-        URL.revokeObjectURL(temporal);
-      }
-      const form = new FormData();
-      form.append("datos", JSON.stringify({ accion: "collage", productoId }));
-      form.append("foto", foto, "collage.jpg");
-      const r = await fetch("/api/ia/gratis", { method: "POST", body: form });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || "No se pudo guardar el collage.");
+      await guardarCollage(seleccionadas.map((f) => f.url));
       await cargarTrabajos();
       await onNuevos();
       irA(7);
@@ -949,18 +969,20 @@ export default function EstudioIA({
                 Marcaste {Math.min(seleccion.length, MAX_FOTOS_IA)} fotos · ¿cómo las usa la IA?
               </p>
               <div className="flex flex-wrap gap-2">
-                <Chip activo={porSeparado} onClick={() => setPorSeparado(true)}>
-                  Editar cada foto por separado
-                </Chip>
                 <Chip activo={!porSeparado} onClick={() => setPorSeparado(false)}>
-                  La IA las mira juntas y hace una
+                  Editarlas y juntarlas en una sola imagen
+                </Chip>
+                <Chip activo={porSeparado} onClick={() => setPorSeparado(true)}>
+                  Una foto editada por cada una
                 </Chip>
               </div>
               <p className="text-xs text-gray-500 mt-1">
                 {porSeparado
                   ? `Sale una edición por cada foto: en total ${cantidadFotos} fotos nuevas.`
-                  : "La IA mira todas las fotos para entender mejor el producto y arma una sola edición nueva."}{" "}
-                ¿Querés ver tus fotos juntas en una sola imagen? Elegí <b>🧩 Juntar fotos en una</b> arriba.
+                  : "La IA edita cada foto y después el panel las junta en una sola imagen, con el título y los detalles. También te quedan las editadas sueltas."}
+                {eleccion.clase === "paga" &&
+                  !porSeparado &&
+                  " Con la IA paga las fotos se juntan después: elegí 🧩 Juntar fotos en una con las editadas."}
               </p>
             </div>
           )}
