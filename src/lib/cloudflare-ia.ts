@@ -49,8 +49,33 @@ export function medidas(formato: FormatoId) {
   return { width: 1024, height: 1280 };
 }
 
-// Genera una foto con las fotos de base como referencia (cada una < 512 px).
+// El filtro de seguridad de Cloudflare a veces frena fotos normales de producto
+// (sobre todo con modelo). Reintentamos aclarando que es una foto apta para todos.
+const APTA =
+  " Family-friendly e-commerce product photo, safe for work. Any person is an adult, fully and modestly dressed in casual everyday clothes, in a natural relaxed pose.";
+
 export async function generarFotoGratis(
+  modelo: ModeloGratis,
+  prompt: string,
+  referencias: Blob[],
+  formato: FormatoId
+): Promise<{ datos: ArrayBuffer; contentType: string }> {
+  for (let intento = 0; intento < 3; intento++) {
+    try {
+      return await generarUnaVez(modelo, intento === 0 ? prompt : `${prompt}${APTA}`, referencias, formato);
+    } catch (e) {
+      if (!(e instanceof Error) || e.message !== MARCADA) throw e;
+    }
+  }
+  throw new Error(
+    "El filtro de seguridad de la IA gratis frenó esta foto (a veces se equivoca con fotos normales). Probá de nuevo, cambiá el lugar o la modelo, o elegí otra foto de base."
+  );
+}
+
+const MARCADA = "marcada-por-filtro";
+
+// Genera una foto con las fotos de base como referencia (cada una < 512 px).
+async function generarUnaVez(
   modelo: ModeloGratis,
   prompt: string,
   referencias: Blob[],
@@ -60,7 +85,7 @@ export async function generarFotoGratis(
   if (!cred) throw new Error("Falta conectar la IA gratis (Cloudflare) en \"Conectar IAs\".");
   const { width, height } = medidas(formato);
   const form = new FormData();
-  form.append("prompt", prompt.slice(0, 2000));
+  form.append("prompt", prompt.length > 2000 ? prompt.slice(0, 1800) + prompt.slice(-200) : prompt);
   form.append("width", String(width));
   form.append("height", String(height));
   referencias.slice(0, 4).forEach((r, i) => form.append(`input_image_${i}`, r, `ref${i}.jpg`));
@@ -85,6 +110,7 @@ export async function generarFotoGratis(
     if (r.status === 429 || /neuron|limit|quota/i.test(msg)) {
       throw new Error("Se terminó el cupo gratis de hoy. Mañana se renueva, o usá otra IA.");
     }
+    if (/flagged/i.test(msg)) throw new Error(MARCADA);
     if (r.status === 401 || r.status === 403) {
       throw new Error("La clave de Cloudflare no es válida. Volvé a conectarla en el Paso 1 · Conectar IAs.");
     }
