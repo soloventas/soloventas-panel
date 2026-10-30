@@ -22,10 +22,9 @@ import {
   type TextoPosId,
   type VideoTipoId,
 } from "@/lib/estudio";
-import VistaPreviaIA from "./vista-previa-ia";
 import Navegacion from "@/app/dashboard/edicion/navegacion";
 import { upload } from "@vercel/blob/client";
-import { detallesDeDescripcion, hayTexto, ponerTextoEnFoto, type TextoFoto } from "@/lib/texto-foto";
+import { armarCollage, detallesDeDescripcion, hayTexto, ponerTextoEnFoto, type TextoFoto } from "@/lib/texto-foto";
 import { MODELOS_GRATIS } from "@/lib/cloudflare-ia";
 import {
   achicarFoto,
@@ -65,6 +64,7 @@ type Trabajo = {
 function nombreDeIA(modelo?: string) {
   if (!modelo) return "IA";
   if (modelo === "video-gratis-navegador") return "Video con tus fotos";
+  if (modelo === "collage-navegador") return "Collage en tu panel";
   return (
     MODELOS_GRATIS.find((m) => m.modelo === modelo)?.nombre ||
     MODELOS_AUTO.find((m) => m.endpoint === modelo)?.nombre ||
@@ -84,6 +84,8 @@ type Tarea = {
   recomendada?: boolean;
   // Video gratis armado en el panel con tus fotos (sin IA de video).
   panelVideo?: boolean;
+  // Collage gratis: junta tus fotos reales en una sola imagen (sin IA).
+  collage?: boolean;
 };
 
 const ICONOS_FOTO: Record<FotoTipoId, string> = {
@@ -109,6 +111,15 @@ const TAREAS: Tarea[] = [
     ayuda: f.ayuda,
     recomendada: f.id === "pack",
   })),
+  {
+    id: "foto-collage",
+    modo: "FOTO" as Modo,
+    fotoTipo: "mejorar" as FotoTipoId,
+    icono: "🧩",
+    nombre: "Juntar fotos en una",
+    ayuda: "Gratis: pone tus fotos reales juntas en una sola imagen (hasta 4), con el título y los detalles escritos sin faltas. Ideal para mostrar el producto desde varios lados.",
+    collage: true,
+  },
   {
     id: "video-fotos",
     modo: "VIDEO" as Modo,
@@ -269,6 +280,9 @@ export default function EstudioIA({
   const [avance, setAvance] = useState<string | null>(null);
   // Detalles escritos sobre la foto por el panel (uno por renglón).
   const [detallesTexto, setDetallesTexto] = useState("");
+  // Página web de donde traer los detalles (por ejemplo, la del fabricante).
+  const [paginaWeb, setPaginaWeb] = useState("");
+  const [leyendoPagina, setLeyendoPagina] = useState(false);
   // Trabajos de la IA paga que esperan que les escribamos el texto al terminar.
   const textoPendiente = useRef<Map<string, TextoFoto>>(new Map());
   // Anuncio UGC: qué hace la persona y la descripción del vendedor.
@@ -304,8 +318,13 @@ export default function EstudioIA({
   const fotoTipo: FotoTipoId = tarea.fotoTipo || "pack";
   const videoTipo: VideoTipoId = tarea.videoTipo || "giro";
   const herramientaFoto = FOTO_TIPOS.find((f) => f.id === fotoTipo)!;
-  const usaEscena = modo === "VIDEO" ? !tarea.panelVideo : herramientaFoto.usaEscena;
-  const usaPersona = modo === "FOTO" ? herramientaFoto.usaPersona : videoTipo === "persona" || videoTipo === "ugc";
+  const esCollage = Boolean(tarea.collage);
+  const usaEscena = esCollage ? false : modo === "VIDEO" ? !tarea.panelVideo : herramientaFoto.usaEscena;
+  const usaPersona = esCollage
+    ? false
+    : modo === "FOTO"
+    ? herramientaFoto.usaPersona
+    : videoTipo === "persona" || videoTipo === "ugc";
   // El video con tus fotos no puede crear una persona: el UGC va con una IA de video.
   const esUgc = modo === "VIDEO" && videoTipo === "ugc";
   const panelVideo = Boolean(tarea.panelVideo);
@@ -371,10 +390,10 @@ export default function EstudioIA({
   // Las fotos que de verdad se usan con la tarea elegida.
   const usadas = panelVideo ? seleccion : seleccion.slice(0, MAX_FOTOS_IA);
   // Grupos de fotos que se mandan a la IA: cada foto sola, o todas juntas.
-  const separar = modo === "FOTO" && porSeparado && usadas.length > 1;
+  const separar = modo === "FOTO" && !esCollage && porSeparado && usadas.length > 1;
   const grupos = separar ? usadas.map((id) => [id]) : [usadas];
   const nombrePanel = modo === "VIDEO" ? VIDEO_PANEL.nombre : modeloGratis.nombre;
-  const cantidadFotos = modo === "FOTO" ? prompts.length * grupos.length : 0;
+  const cantidadFotos = esCollage ? 1 : modo === "FOTO" ? prompts.length * grupos.length : 0;
   const costo = costoTexto(modelo, modo, duracion, cantidadFotos);
 
   const seleccionadas = usadas
@@ -417,6 +436,24 @@ export default function EstudioIA({
       const m = lista.find((t) => t.media?.id === id)?.media;
       if (m) await ponerTexto(m.id, m.url, tf);
     }
+  }
+
+  async function traerDePagina() {
+    if (!paginaWeb.trim()) return;
+    setError("");
+    setLeyendoPagina(true);
+    const r = await fetch("/api/ia/pagina", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: paginaWeb.trim(), producto }),
+    });
+    const data = await r.json().catch(() => ({}));
+    setLeyendoPagina(false);
+    if (!r.ok) {
+      setError(data.error || "No se pudo leer la página.");
+      return;
+    }
+    setDetallesTexto((data.detalles as string[]).join("\n"));
   }
 
   function elegirIA(e: EleccionIA) {
@@ -478,6 +515,8 @@ export default function EstudioIA({
   }
 
   const problemaOpciones = (() => {
+    if (esCollage && seleccion.length < 2)
+      return "Para juntar fotos marcá al menos 2 en el paso 3.";
     if (modo === "VIDEO" && videoTipo === "colores" && seleccion.length < 2)
       return "Para el cambio de color marcá 2 fotos en distintos colores (paso 3).";
     if (usaEscena && escena === "personalizada" && !escenaPersonalizada.trim())
@@ -486,6 +525,7 @@ export default function EstudioIA({
   })();
   const problema = seleccion.length === 0 ? "Elegí al menos una foto de base (paso 3)." : problemaOpciones;
   const problemaIA = (() => {
+    if (esCollage) return null;
     if (ia[modo].clase === "panel" && modo === "FOTO" && !cfActivo)
       return "Para usar la IA gratis conectala en el paso 1 · Conectar IAs.";
     if (ia[modo].clase === "paga" && !falActivo)
@@ -606,6 +646,37 @@ export default function EstudioIA({
       await cargarTrabajos();
       await onNuevos();
       irA(7);
+    }
+    setEnviando(false);
+  }
+
+  // Collage gratis: junta las fotos reales en una, con el texto escrito por el panel.
+  async function armarCollageGratis() {
+    if (problema) return;
+    setError("");
+    setEnviando(true);
+    setDesde(Date.now());
+    try {
+      let foto = await armarCollage(
+        seleccionadas.map((f) => f.url),
+        formato
+      );
+      if (hayTexto(textoFoto)) {
+        const temporal = URL.createObjectURL(foto);
+        foto = await ponerTextoEnFoto(temporal, textoFoto);
+        URL.revokeObjectURL(temporal);
+      }
+      const form = new FormData();
+      form.append("datos", JSON.stringify({ accion: "collage", productoId }));
+      form.append("foto", foto, "collage.jpg");
+      const r = await fetch("/api/ia/gratis", { method: "POST", body: form });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "No se pudo guardar el collage.");
+      await cargarTrabajos();
+      await onNuevos();
+      irA(7);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo armar el collage.");
     }
     setEnviando(false);
   }
@@ -780,6 +851,7 @@ export default function EstudioIA({
 
   // Paso 8: repetir la misma edición con las mismas opciones.
   function hacerDeNuevo() {
+    if (esCollage) return armarCollageGratis();
     if (eleccion.clase === "paga") return generar();
     if (modo === "VIDEO") return armarVideoGratis();
     return generarGratis();
@@ -871,7 +943,7 @@ export default function EstudioIA({
             ))}
           </div>
           <p className="text-xs text-gray-500">{tarea.ayuda}</p>
-          {modo === "FOTO" && Math.min(seleccion.length, MAX_FOTOS_IA) > 1 && (
+          {modo === "FOTO" && !esCollage && Math.min(seleccion.length, MAX_FOTOS_IA) > 1 && (
             <div>
               <p className="text-xs font-medium text-gray-700 mb-1.5">
                 Marcaste {Math.min(seleccion.length, MAX_FOTOS_IA)} fotos · ¿cómo las usa la IA?
@@ -881,13 +953,14 @@ export default function EstudioIA({
                   Editar cada foto por separado
                 </Chip>
                 <Chip activo={!porSeparado} onClick={() => setPorSeparado(false)}>
-                  Juntar todas en una sola imagen
+                  La IA las mira juntas y hace una
                 </Chip>
               </div>
               <p className="text-xs text-gray-500 mt-1">
                 {porSeparado
                   ? `Sale una edición por cada foto: en total ${cantidadFotos} fotos nuevas.`
-                  : "La IA mira todas las fotos juntas para entender mejor el producto y arma una edición."}
+                  : "La IA mira todas las fotos para entender mejor el producto y arma una sola edición nueva."}{" "}
+                ¿Querés ver tus fotos juntas en una sola imagen? Elegí <b>🧩 Juntar fotos en una</b> arriba.
               </p>
             </div>
           )}
@@ -1013,7 +1086,19 @@ export default function EstudioIA({
       )}
 
       {/* Paso 5 · IA */}
-      {paso === 5 && (
+      {paso === 5 && esCollage && (
+        <>
+          <div className="rounded-lg border-2 border-navy bg-navy/5 p-3">
+            <p className="text-sm font-semibold text-gray-900">⭐ Lo arma tu panel · Gratis</p>
+            <p className="text-xs text-gray-600 mt-0.5">
+              Para juntar fotos no hace falta IA: el panel pone tus {Math.min(seleccion.length, MAX_FOTOS_IA)} fotos reales
+              en una sola imagen, sin cambiarlas, y escribe el texto sin faltas.
+            </p>
+          </div>
+          <Navegacion onAtras={() => irA(4)} onSiguiente={() => irA(6)} />
+        </>
+      )}
+      {paso === 5 && !esCollage && (
         <>
           {(modo === "FOTO" || panelVideo) && (
             <div>
@@ -1082,30 +1167,6 @@ export default function EstudioIA({
               </p>
             )
           )}
-          {/* Vista previa de lo que va a hacer la IA elegida */}
-          <VistaPreviaIA
-            modo={modo}
-            fotoTipo={fotoTipo}
-            videoTipo={videoTipo}
-            fotos={seleccionadas}
-            escena={escena}
-            persona={persona}
-            formato={formato}
-            duracion={
-              panelVideo
-                ? duracionVideo({ urls: seleccionadas.map((f) => f.url), segundosPorFoto: segFoto, cierre })
-                : duracion
-            }
-            texto={texto.trim()}
-            textoPos={textoPos}
-            nombreIA={
-              eleccion.clase === "panel" ? nombrePanel : eleccion.clase === "gratis" ? herramienta.nombre : modelo.nombre
-            }
-            etiquetaIA={eleccion.clase === "paga" ? costo : eleccion.clase === "panel" ? "Gratis en tu panel" : "Gratis"}
-            gratis={eleccion.clase !== "paga"}
-            videoConFotos={modo === "VIDEO" && eleccion.clase === "panel"}
-            estilos={ESTILOS.filter((e) => estilos.includes(e.id))}
-          />
           <Navegacion
             onAtras={() => irA(4)}
             onSiguiente={() => irA(6)}
@@ -1193,6 +1254,22 @@ export default function EstudioIA({
                     Usar la descripción del catálogo
                   </button>
                 )}
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 mb-2">
+                <input
+                  value={paginaWeb}
+                  onChange={(e) => setPaginaWeb(e.target.value)}
+                  placeholder="Traer de una página web, ej.: www.evubarista.com.ar"
+                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                />
+                <button
+                  type="button"
+                  onClick={traerDePagina}
+                  disabled={!paginaWeb.trim() || leyendoPagina}
+                  className="shrink-0 rounded-md border border-navy text-navy text-sm font-semibold px-3 py-2 hover:bg-navy/5 disabled:opacity-50"
+                >
+                  {leyendoPagina ? "Leyendo la página..." : "🌐 Traer detalles"}
+                </button>
               </div>
               <textarea
                 value={detallesTexto}
@@ -1359,7 +1436,19 @@ export default function EstudioIA({
           {problema && <p className="text-sm text-amber-700">{problema}</p>}
 
           {/* 5. Hacerlo */}
-          {eleccion.clase === "panel" ? (
+          {esCollage ? (
+            <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={armarCollageGratis}
+                disabled={Boolean(problema) || enviando}
+                className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+              >
+                {enviando ? "Armando..." : resultados.length > 0 ? "↻ Armar otro collage" : "🧩 Juntar las fotos"}
+              </button>
+              <span className="text-xs text-green-900">Gratis · tarda unos segundos</span>
+            </div>
+          ) : eleccion.clase === "panel" ? (
             <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
               <p className="text-sm font-semibold text-green-900">
                 Hacelo gratis acá mismo con {nombrePanel}
