@@ -4,9 +4,11 @@ import { useCallback, useMemo, useState } from "react";
 import MediaManager, { type Media } from "./media-manager";
 import Publicador from "./publicador";
 import EstudioIA from "./estudio-ia";
+import Navegacion from "@/app/dashboard/edicion/navegacion";
 
 // Une la carga de fotos/videos, el Estudio IA y el publicador, para que lo
 // recién subido o generado aparezca enseguida en las otras secciones.
+// En Edición se muestra de a un paso: 3 fotos, 4 a 7 Estudio IA, 8 publicar.
 export default function SeccionMedios({
   productoId,
   producto,
@@ -15,6 +17,8 @@ export default function SeccionMedios({
   iaActiva,
   falActivo,
   cfActivo,
+  paso,
+  irA,
 }: {
   productoId: string;
   producto: string;
@@ -23,6 +27,8 @@ export default function SeccionMedios({
   iaActiva: boolean;
   falActivo: boolean;
   cfActivo: boolean;
+  paso: number;
+  irA: (paso: number) => void;
 }) {
   const [base, setBase] = useState<Media[]>(inicial);
   const [version, setVersion] = useState(0);
@@ -49,23 +55,47 @@ export default function SeccionMedios({
 
   return (
     <div className="flex flex-col gap-5">
-      <MediaManager key={version} productoId={productoId} inicial={base} onCambio={setMedia} />
+      {paso === 3 && (
+        <details open={fotosBase.length === 0} className="rounded-lg border border-gray-200">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-navy">
+            📤 Subir o cambiar fotos y videos del producto
+          </summary>
+          <div className="p-3 pt-0">
+            <MediaManager key={version} productoId={productoId} inicial={base} onCambio={setMedia} />
+          </div>
+        </details>
+      )}
       <EstudioIA
         productoId={productoId}
         producto={producto}
         fotos={fotosBase}
         falActivo={falActivo}
         cfActivo={cfActivo}
+        paso={paso}
+        irA={irA}
         onNuevos={recargar}
-        onPublicar={(ids, tipo) => setPreseleccion({ ids, tipo, clave: Date.now() })}
+        onPublicar={(ids, tipo) => {
+          setPreseleccion({ ids, tipo, clave: Date.now() });
+          setTimeout(
+            () => document.getElementById("publicar-redes")?.scrollIntoView({ behavior: "smooth" }),
+            300
+          );
+        }}
       />
-      <Publicador
-        productoId={productoId}
-        media={aprobados}
-        redes={redes}
-        iaActiva={iaActiva}
-        preseleccion={preseleccion}
-      />
+      {paso === 8 && (
+        <div id="publicar-redes">
+          <Publicador
+            productoId={productoId}
+            media={aprobados}
+            redes={redes}
+            iaActiva={iaActiva}
+            preseleccion={preseleccion}
+          />
+          <div className="mt-4">
+            <Navegacion onAtras={() => irA(7)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
