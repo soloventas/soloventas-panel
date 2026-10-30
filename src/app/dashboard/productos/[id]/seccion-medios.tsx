@@ -39,6 +39,8 @@ export default function SeccionMedios({
     tipo: "FOTO" | "VIDEO";
     clave: number;
   } | null>(null);
+  // Lo que se pidió en el paso 6 para el texto de la publicación.
+  const [textoPublicacion, setTextoPublicacion] = useState("");
 
   // Vuelve a leer las fotos/videos (por ejemplo, cuando la IA termina algo).
   const recargar = useCallback(async () => {
@@ -74,6 +76,7 @@ export default function SeccionMedios({
         paso={paso}
         irA={irA}
         onNuevos={recargar}
+        onTextoPublicacion={setTextoPublicacion}
         onPublicar={(ids, tipo) => {
           setPreseleccion({ ids, tipo, clave: Date.now() });
           setTimeout(
@@ -90,6 +93,7 @@ export default function SeccionMedios({
             redes={redes}
             iaActiva={iaActiva}
             preseleccion={preseleccion}
+            indicacionesIniciales={textoPublicacion}
           />
           <div className="mt-4">
             <Navegacion onAtras={() => irA(7)} />
