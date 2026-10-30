@@ -92,6 +92,55 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ id: media.id, url: blob.url });
   }
 
+  // Collage armado en el navegador con las fotos reales: se guarda como resultado.
+  if (datos.accion === "collage") {
+    const foto = form.get("foto");
+    if (!datos.productoId || !foto || typeof foto === "string") {
+      return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
+    }
+    const existentes = await prisma.mediaProducto.count({
+      where: { productoId: datos.productoId, tipo: "FOTO" },
+    });
+    if (existentes >= maximoPorTipo("FOTO")) {
+      return NextResponse.json(
+        { error: `No hay lugar para más fotos (máximo ${maximoPorTipo("FOTO")}). Descartá alguna en el paso 8 para seguir.` },
+        { status: 400 }
+      );
+    }
+    const blob = await put(`productos/${datos.productoId}/fotos/collage.jpg`, foto, {
+      access: "public",
+      addRandomSuffix: true,
+      contentType: "image/jpeg",
+    });
+    const media = await prisma.mediaProducto.create({
+      data: {
+        productoId: datos.productoId,
+        tipo: "FOTO",
+        url: blob.url,
+        pathname: blob.pathname,
+        nombre: "Collage.jpg",
+        tamano: foto.size,
+        orden: await siguienteOrden(datos.productoId, "FOTO"),
+        origen: "IA",
+        aprobado: false,
+      },
+    });
+    const trabajo = await prisma.trabajoIA.create({
+      data: {
+        productoId: datos.productoId,
+        tipo: "FOTO",
+        modelo: "collage-navegador",
+        prompt: "Collage con las fotos del producto",
+        statusUrl: "",
+        responseUrl: "",
+        estado: "LISTO",
+        mediaId: media.id,
+      },
+      select: SELECCION,
+    });
+    return NextResponse.json(trabajo, { status: 201 });
+  }
+
   if (!(await cfConfigurado())) {
     return NextResponse.json(
       { error: "Falta conectar la IA gratis (Cloudflare) en Vercel." },
@@ -174,7 +223,7 @@ export async function POST(req: NextRequest) {
   const existentes = await prisma.mediaProducto.count({ where: { productoId, tipo: "FOTO" } });
   if (existentes + prompts.length > maximoPorTipo("FOTO")) {
     return NextResponse.json(
-      { error: "No hay lugar para más fotos (máximo 20). Borrá alguna para generar más." },
+      { error: "No hay lugar para más fotos (máximo 20). Descartá alguna en el paso 8 para generar más." },
       { status: 400 }
     );
   }
