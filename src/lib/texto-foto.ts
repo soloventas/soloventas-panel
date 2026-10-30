@@ -42,28 +42,9 @@ function partir(ctx: CanvasRenderingContext2D, texto: string, ancho: number) {
   return lineas;
 }
 
-// Achica la letra hasta que el título entre en 3 renglones como máximo.
-function medirTitulo(ctx: CanvasRenderingContext2D, titulo: string, W: number) {
-  let tam = Math.round(W * 0.075);
-  let lineas: string[] = [];
-  while (tam > W * 0.035) {
-    ctx.font = `800 ${tam}px ${FUENTE}`;
-    lineas = partir(ctx, titulo, W * 0.88);
-    if (lineas.length <= 3) break;
-    tam = Math.round(tam * 0.9);
-  }
-  return { tam, lineas };
-}
-
-function escribir(ctx: CanvasRenderingContext2D, linea: string, x: number, y: number, tam: number) {
-  ctx.lineJoin = "round";
-  ctx.lineWidth = Math.max(2, tam * 0.12);
-  ctx.strokeStyle = "rgba(0,0,0,0.85)";
-  ctx.strokeText(linea, x, y);
-  ctx.fillStyle = "#fff";
-  ctx.fillText(linea, x, y);
-}
-
+// El texto va en franjas arriba y abajo, nunca encima del producto: la foto se
+// achica lo justo para entrar completa en el medio, sobre un fondo hecho con la
+// misma foto desenfocada. El tamaño final de la imagen no cambia.
 export async function ponerTextoEnFoto(url: string, t: TextoFoto): Promise<Blob> {
   const img = await cargarImagen(url);
   const W = img.naturalWidth;
@@ -72,72 +53,96 @@ export async function ponerTextoEnFoto(url: string, t: TextoFoto): Promise<Blob>
   c.width = W;
   c.height = H;
   const ctx = c.getContext("2d")!;
-  ctx.drawImage(img, 0, 0, W, H);
   ctx.textBaseline = "top";
 
   const titulo = t.titulo.trim();
   const detalles = t.detalles.map((d) => d.trim()).filter(Boolean).slice(0, 8);
-  const margen = Math.round(W * 0.06);
-  const { tam: tamT, lineas: lineasT } = titulo ? medirTitulo(ctx, titulo, W) : { tam: 0, lineas: [] };
-  const altoT = lineasT.length * tamT * 1.15;
+  const margen = Math.round(W * 0.045);
 
-  // Detalles: renglones con ✔, en un panel oscuro abajo.
-  let tamD = Math.round(W * 0.042);
+  // Título: hasta 2 renglones, letra que se achica si hace falta.
+  let tamT = Math.round(W * 0.058);
+  let lineasT: string[] = [];
+  while (titulo && tamT > W * 0.03) {
+    ctx.font = `800 ${tamT}px ${FUENTE}`;
+    lineasT = partir(ctx, titulo, W - margen * 2);
+    if (lineasT.length <= 2) break;
+    tamT = Math.round(tamT * 0.9);
+  }
+  const altoT = titulo ? lineasT.length * tamT * 1.15 + margen * 1.2 : 0;
+
+  // Detalles: en 2 columnas si son más de 3, para ocupar poco alto.
+  const columnas = detalles.length > 3 ? 2 : 1;
+  const anchoCol = (W - margen * 2 - (columnas - 1) * margen) / columnas;
+  let tamD = Math.round(W * 0.032);
   let renglones: string[][] = [];
-  while (detalles.length && tamD > W * 0.025) {
+  let altoD = 0;
+  while (detalles.length && tamD > W * 0.02) {
     ctx.font = `600 ${tamD}px ${FUENTE}`;
-    renglones = detalles.map((d) => partir(ctx, d, W - margen * 2 - tamD * 1.4));
-    const total = renglones.flat().length * tamD * 1.3 + detalles.length * tamD * 0.35;
-    if (total < H * 0.38) break;
+    renglones = detalles.map((d) => partir(ctx, d, anchoCol - tamD * 1.4));
+    const filas: number[] = [];
+    renglones.forEach((r, i) => {
+      const fila = Math.floor(i / columnas);
+      filas[fila] = Math.max(filas[fila] || 0, r.length);
+    });
+    altoD = filas.reduce((a, n) => a + n * tamD * 1.25 + tamD * 0.45, 0) + margen * 1.2;
+    if (altoD < H * 0.24) break;
     tamD = Math.round(tamD * 0.9);
   }
-  const altoD = detalles.length
-    ? renglones.flat().length * tamD * 1.3 + detalles.length * tamD * 0.35
-    : 0;
+  if (!detalles.length) altoD = 0;
 
-  const tituloAbajo = Boolean(titulo) && t.pos === "abajo";
-  const altoAbajo = altoD + (tituloAbajo ? altoT + tamD * 0.6 : 0);
+  const arriba = titulo && t.pos !== "abajo" ? altoT : 0;
+  const abajo = altoD + (titulo && t.pos === "abajo" ? altoT : 0);
 
-  if (titulo && !tituloAbajo) {
-    const alto = altoT + margen * 1.6;
-    const g = ctx.createLinearGradient(0, 0, 0, alto);
-    g.addColorStop(0, "rgba(0,0,0,0.6)");
-    g.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, alto);
+  // Fondo: la misma foto agrandada, desenfocada y oscurecida.
+  const escalaF = Math.max(W / img.naturalWidth, H / img.naturalHeight) * 1.1;
+  ctx.filter = "blur(28px) brightness(0.45)";
+  ctx.drawImage(
+    img,
+    (W - img.naturalWidth * escalaF) / 2,
+    (H - img.naturalHeight * escalaF) / 2,
+    img.naturalWidth * escalaF,
+    img.naturalHeight * escalaF
+  );
+  ctx.filter = "none";
+
+  // La foto entera en el espacio del medio.
+  const libreH = H - arriba - abajo;
+  const escala = Math.min(W / img.naturalWidth, libreH / img.naturalHeight);
+  const fw = img.naturalWidth * escala;
+  const fh = img.naturalHeight * escala;
+  ctx.drawImage(img, (W - fw) / 2, arriba + (libreH - fh) / 2, fw, fh);
+
+  const ponerTitulo = (y0: number) => {
     ctx.font = `800 ${tamT}px ${FUENTE}`;
     ctx.textAlign = "center";
-    lineasT.forEach((l, i) => escribir(ctx, l, W / 2, margen * 0.8 + i * tamT * 1.15, tamT));
-  }
+    ctx.fillStyle = "#fff";
+    lineasT.forEach((l, i) => ctx.fillText(l, W / 2, y0 + margen * 0.6 + i * tamT * 1.15));
+  };
 
-  if (altoAbajo > 0) {
-    const alto = altoAbajo + margen * 2;
-    const g = ctx.createLinearGradient(0, H - alto, 0, H);
-    g.addColorStop(0, "rgba(0,0,0,0)");
-    g.addColorStop(0.25, "rgba(0,0,0,0.65)");
-    g.addColorStop(1, "rgba(0,0,0,0.85)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, H - alto, W, alto);
-    let y = H - margen - altoAbajo;
-    if (tituloAbajo) {
-      ctx.font = `800 ${tamT}px ${FUENTE}`;
-      ctx.textAlign = detalles.length ? "left" : "center";
-      const x = detalles.length ? margen : W / 2;
-      lineasT.forEach((l, i) => escribir(ctx, l, x, y + i * tamT * 1.15, tamT));
-      y += altoT + tamD * 0.6;
+  if (arriba) ponerTitulo(0);
+  if (abajo) {
+    let y = H - abajo;
+    if (titulo && t.pos === "abajo") {
+      ponerTitulo(y);
+      y += altoT;
     }
+    y += margen * 0.6;
     ctx.textAlign = "left";
-    renglones.forEach((partes) => {
-      ctx.font = `700 ${tamD}px ${FUENTE}`;
-      ctx.fillStyle = "#facc15";
-      ctx.fillText("✔", margen, y);
-      ctx.font = `600 ${tamD}px ${FUENTE}`;
-      partes.forEach((l, i) => {
+    for (let i = 0; i < renglones.length; i += columnas) {
+      let altoFila = 0;
+      for (let k = 0; k < columnas && i + k < renglones.length; k++) {
+        const partes = renglones[i + k];
+        const x = margen + k * (anchoCol + margen);
+        ctx.font = `700 ${tamD}px ${FUENTE}`;
+        ctx.fillStyle = "#facc15";
+        ctx.fillText("✔", x, y);
+        ctx.font = `600 ${tamD}px ${FUENTE}`;
         ctx.fillStyle = "#fff";
-        ctx.fillText(l, margen + tamD * 1.4, y + i * tamD * 1.3);
-      });
-      y += partes.length * tamD * 1.3 + tamD * 0.35;
-    });
+        partes.forEach((l, j) => ctx.fillText(l, x + tamD * 1.4, y + j * tamD * 1.25));
+        altoFila = Math.max(altoFila, partes.length * tamD * 1.25);
+      }
+      y += altoFila + tamD * 0.45;
+    }
   }
 
   return new Promise((ok, mal) =>
