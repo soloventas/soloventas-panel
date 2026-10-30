@@ -325,7 +325,7 @@ function promptDividida(opciones: OpcionesFoto, escena: string, formato: string)
     "Both halves share consistent lighting and color palette and read as one polished ad.",
     `Compose it for ${formato}.`,
     instruccionTexto(opciones),
-    opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
+    opciones.extra?.trim() ? `IMPORTANT, the seller asks for this (written in Spanish), follow it closely as long as the product stays identical: ${opciones.extra.trim()}` : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -353,7 +353,7 @@ function promptFicha(opciones: OpcionesFoto, formato: string) {
     "At the bottom, a solid colored banner with a short Spanish call to action. Use a coherent brand color palette, modern bold sans-serif typography and correct Spanish spelling. No prices.",
     `Compose it for ${formato}.`,
     instruccionTexto(opciones),
-    opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
+    opciones.extra?.trim() ? `IMPORTANT, the seller asks for this (written in Spanish), follow it closely as long as the product stays identical: ${opciones.extra.trim()}` : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -378,7 +378,7 @@ export function promptFoto(opciones: OpcionesFoto) {
     `Style: ${estiloEn(opciones.estilo)}.`,
     `Compose it for ${formato}, keeping the product clearly visible and prominent.`,
     instruccionTexto(opciones),
-    opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
+    opciones.extra?.trim() ? `IMPORTANT, the seller asks for this (written in Spanish), follow it closely as long as the product stays identical: ${opciones.extra.trim()}` : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -418,7 +418,7 @@ export function promptsFotos(
   opciones: OpcionesFoto & { estilos?: EstiloId[] }
 ): { titulo: string; prompt: string; conTexto?: boolean }[] {
   const estilos = limpiarEstilos(opciones.estilos);
-  const extra = opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "";
+  const extra = opciones.extra?.trim() ? `IMPORTANT, the seller asks for this (written in Spanish), follow it closely as long as the product stays identical: ${opciones.extra.trim()}` : "";
   const textoPedido = instruccionTexto(opciones);
   if (tipo === "pack") return promptsPackFoto(opciones, estilos);
   if (tipo === "escena") {
@@ -501,7 +501,7 @@ export function promptVideo(opciones: {
     `Product: ${opciones.producto}.`,
     "The product must remain exactly identical to the reference image: same shape, colors, logos and details throughout the whole video.",
     textoPedido,
-    opciones.extra?.trim() ? `Extra details: ${opciones.extra.trim()}` : "",
+    opciones.extra?.trim() ? `IMPORTANT, the seller asks for this (written in Spanish), follow it closely as long as the product stays identical: ${opciones.extra.trim()}` : "",
   ]
     .filter(Boolean)
     .join(" ");
