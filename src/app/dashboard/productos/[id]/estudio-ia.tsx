@@ -25,6 +25,7 @@ import {
 import VistaPreviaIA from "./vista-previa-ia";
 import Navegacion from "@/app/dashboard/edicion/navegacion";
 import { upload } from "@vercel/blob/client";
+import { detallesDeDescripcion, hayTexto, ponerTextoEnFoto, type TextoFoto } from "@/lib/texto-foto";
 import { MODELOS_GRATIS } from "@/lib/cloudflare-ia";
 import {
   achicarFoto,
@@ -144,6 +145,10 @@ const VIDEO_PANEL = {
   detalle: "Gratis y sin límite. Movimiento suave, transiciones y tu texto, con las fotos reales.",
 };
 
+function limpiarEspacios(t: string) {
+  return t.replace(/\s+/g, " ").trim();
+}
+
 function Chip({
   activo,
   onClick,
@@ -213,6 +218,7 @@ function TarjetaIA({
 export default function EstudioIA({
   productoId,
   producto,
+  descripcion = "",
   fotos,
   falActivo,
   cfActivo = false,
@@ -224,6 +230,8 @@ export default function EstudioIA({
 }: {
   productoId: string;
   producto: string;
+  // Descripción del catálogo, para sugerir los detalles que van escritos en la foto.
+  descripcion?: string;
   fotos: Media[];
   falActivo: boolean;
   cfActivo?: boolean;
@@ -259,6 +267,10 @@ export default function EstudioIA({
   const [porSeparado, setPorSeparado] = useState(true);
   const [textoPublicacion, setTextoPublicacion] = useState("");
   const [avance, setAvance] = useState<string | null>(null);
+  // Detalles escritos sobre la foto por el panel (uno por renglón).
+  const [detallesTexto, setDetallesTexto] = useState("");
+  // Trabajos de la IA paga que esperan que les escribamos el texto al terminar.
+  const textoPendiente = useRef<Map<string, TextoFoto>>(new Map());
   // Anuncio UGC: qué hace la persona y la descripción del vendedor.
   const [accion, setAccion] = useState<AccionUgcId>("auto");
   const [detalle, setDetalle] = useState("");
@@ -351,6 +363,11 @@ export default function EstudioIA({
     : herramientas.filter((h, i) => i < VISIBLES || (eleccion.clase === "gratis" && h.id === herramienta.id));
   const modelo = buscarModelo(modo, eleccion.clase === "paga" ? eleccion.id : undefined);
   const modeloGratis = MODELOS_GRATIS.find((m) => m.id === eleccion.id) || MODELOS_GRATIS[0];
+  const textoFoto: TextoFoto = {
+    titulo: limpiarEspacios(texto),
+    pos: textoPos === "abajo" ? "abajo" : "arriba",
+    detalles: detallesTexto.split("\n").map(limpiarEspacios).filter(Boolean),
+  };
   // Las fotos que de verdad se usan con la tarea elegida.
   const usadas = panelVideo ? seleccion : seleccion.slice(0, MAX_FOTOS_IA);
   // Grupos de fotos que se mandan a la IA: cada foto sola, o todas juntas.
@@ -374,6 +391,34 @@ export default function EstudioIA({
     }
   }, [modo, panelVideo, ia.VIDEO.clase]);
 
+  // Escribe el texto sobre una foto hecha por la IA y la reemplaza. Devuelve la URL nueva.
+  async function ponerTexto(mediaId: string, url: string, tf: TextoFoto) {
+    try {
+      const foto = await ponerTextoEnFoto(url, tf);
+      const form = new FormData();
+      form.append("datos", JSON.stringify({ accion: "texto", productoId, mediaId }));
+      form.append("foto", foto, "foto.jpg");
+      const r = await fetch("/api/ia/gratis", { method: "POST", body: form });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error);
+      return data.url as string;
+    } catch {
+      setError("La foto salió bien, pero no se pudo escribir el texto encima. Probá de nuevo.");
+      return null;
+    }
+  }
+
+  async function escribirTexto(mediaIds: string[], tf: TextoFoto) {
+    if (mediaIds.length === 0) return;
+    const r = await fetch(`/api/ia/estudio?productoId=${productoId}`, { cache: "no-store" });
+    if (!r.ok) return;
+    const lista: Trabajo[] = await r.json();
+    for (const id of mediaIds) {
+      const m = lista.find((t) => t.media?.id === id)?.media;
+      if (m) await ponerTexto(m.id, m.url, tf);
+    }
+  }
+
   function elegirIA(e: EleccionIA) {
     setIa((prev) => ({ ...prev, [modo]: e }));
   }
@@ -382,6 +427,16 @@ export default function EstudioIA({
     const r = await fetch(`/api/ia/estudio?productoId=${productoId}`, { cache: "no-store" });
     if (!r.ok) return;
     const data: Trabajo[] = await r.json();
+    // Las fotos de la IA paga que terminaron y llevan texto: se lo escribimos.
+    const conTexto = data.filter(
+      (t) => t.estado === "LISTO" && t.media && textoPendiente.current.has(t.id)
+    );
+    for (const t of conTexto) {
+      const tf = textoPendiente.current.get(t.id)!;
+      textoPendiente.current.delete(t.id);
+      const nueva = await ponerTexto(t.media!.id, t.media!.url, tf);
+      if (nueva) t.media = { ...t.media!, url: nueva };
+    }
     setTrabajos(data);
     // Si algo terminó desde la última consulta, recargamos las fotos/videos.
     const listos = data.filter((t) => t.estado === "LISTO").map((t) => t.id);
@@ -475,12 +530,16 @@ export default function EstudioIA({
         extra,
         accion,
         detalle,
-        texto,
+        // En las fotos el texto lo escribe el panel después (la IA escribe con faltas).
+        texto: modo === "FOTO" ? "" : texto,
         textoPos,
         estilos,
       }),
     });
     const data = await r.json().catch(() => ({}));
+    if (r.ok && modo === "FOTO" && hayTexto(textoFoto) && Array.isArray(data)) {
+      (data as { id: string }[]).forEach((t) => textoPendiente.current.set(t.id, textoFoto));
+    }
     if (!r.ok) {
       setEnviando(false);
       setAvance(null);
@@ -517,7 +576,7 @@ export default function EstudioIA({
           persona,
           formato,
           extra,
-          texto,
+          texto: "",
           textoPos,
           estilos,
         })
@@ -531,6 +590,12 @@ export default function EstudioIA({
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || "La IA gratis no pudo generar la foto.");
       hechas++;
+      if (hayTexto(textoFoto)) {
+        const ids = ((data.trabajos || []) as { mediaId: string | null }[])
+          .map((t) => t.mediaId)
+          .filter((id): id is string => Boolean(id));
+        await escribirTexto(ids, textoFoto);
+      }
       if (data.aviso) throw new Error(data.aviso);
       }
     } catch (e) {
@@ -906,7 +971,7 @@ export default function EstudioIA({
                 Estilo de publicidad · marcá hasta {MAX_ESTILOS} y sale una foto por cada uno
               </p>
               <div className="flex flex-wrap gap-2">
-                {ESTILOS.map((e) => {
+                {ESTILOS.filter((e) => e.id !== "ficha").map((e) => {
                   const activo = estilos.includes(e.id);
                   return (
                     <Chip
@@ -1106,10 +1171,42 @@ export default function EstudioIA({
             <p className="text-xs text-gray-500 mt-1">
               {panelVideo
                 ? "Aparece animado sobre las fotos, con la animación que elijas abajo."
-                : "La IA lo escribe tal cual, en letra grande y sin tapar el producto."}{" "}
+                : modo === "FOTO"
+                ? "Lo escribe el panel arriba de la foto, letra por letra como lo pusiste: sin faltas de ortografía."
+                : "La IA de video lo escribe en el video."}{" "}
               Dejalo vacío si no querés texto.
             </p>
           </div>
+
+          {modo === "FOTO" && (
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                <p className="text-xs font-medium text-gray-700">
+                  Detalles del producto escritos en la foto (opcional · uno por renglón)
+                </p>
+                {descripcion.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => setDetallesTexto(detallesDeDescripcion(descripcion).join("\n"))}
+                    className="text-xs font-semibold text-navy underline"
+                  >
+                    Usar la descripción del catálogo
+                  </button>
+                )}
+              </div>
+              <textarea
+                value={detallesTexto}
+                onChange={(e) => setDetallesTexto(e.target.value.slice(0, 600))}
+                rows={4}
+                placeholder={"Ej.:\nMolinillo de café incorporado\nPrepara espresso, capuchino y latte\nPanel táctil fácil de usar"}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Aparecen abajo de la foto con un ✔ cada uno. Los escribe el panel tal cual, así que
+                revisá que estén bien escritos.
+              </p>
+            </div>
+          )}
 
           <div>
             <p className="text-xs font-medium text-gray-700 mb-1.5">
