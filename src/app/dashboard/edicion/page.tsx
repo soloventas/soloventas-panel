@@ -41,7 +41,7 @@ export default async function EdicionPage({
   const producto = searchParams.producto
     ? await prisma.producto.findUnique({
         where: { id: searchParams.producto },
-        select: { id: true, nombre: true, codigo: true },
+        select: { id: true, nombre: true, codigo: true, descripcion: true },
       })
     : null;
 
