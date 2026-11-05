@@ -30,6 +30,8 @@ export default function Asistente({
     nombre: string;
     codigo: string;
     descripcion: string | null;
+    colores: string[];
+    talles: string[];
     media: Media[];
     redes: { instagram: string | null; facebook: string | null; tiktok: string | null };
   } | null;
@@ -192,6 +194,7 @@ export default function Asistente({
               productoId={elegido.id}
               producto={elegido.nombre}
               descripcion={elegido.descripcion ?? ""}
+              catalogo={{ colores: elegido.colores, talles: elegido.talles }}
               inicial={elegido.media}
               redes={elegido.redes}
               iaActiva={iaActiva}
