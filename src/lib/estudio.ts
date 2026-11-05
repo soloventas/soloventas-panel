@@ -333,29 +333,28 @@ function promptDividida(opciones: OpcionesFoto, escena: string, formato: string)
     .join(" ");
 }
 
-// Ficha publicitaria tipo infografía: título, beneficios con íconos, colores,
-// talles y el producto en su envase bien detallado. Solo usa datos reales.
+// Ficha publicitaria tipo infografía, como la que arma Gemini con una sola foto:
+// título, frase, talles, beneficios con íconos, colores, cuadro de venta y
+// franja final. La IA lee el envase de la foto y usa solo datos reales.
 function promptFicha(opciones: OpcionesFoto, formato: string) {
   const f = opciones.ficha || {};
   const descripcion = (f.descripcion || "").replace(/\s+/g, " ").trim().slice(0, 500);
   const colores = Array.from(new Set((f.colores || []).filter(Boolean))).slice(0, 4);
   const talles = rangoTalles(f.talles);
   return [
-    "Create a professional Spanish-language infographic advertising sheet for an online store, in the style of a polished retail product flyer.",
+    "Create a high-converting Spanish-language (Argentina) infographic advertising flyer for an online store, like a polished retail product sheet made by a professional graphic designer for Instagram.",
     FIDELIDAD,
     `Product: ${opciones.producto}.`,
-    `Layout on a soft light background with a wooden surface at the bottom: on the RIGHT, large and sharply detailed, the product exactly as in the reference, including its package with all printed text, logos and labels fully legible. On the LEFT, a bold two-color headline with the product name "${opciones.producto}".`,
-    descripcion
-      ? `Below the headline, three short benefit rows, each with a round flat icon, a bold uppercase title and one short line, written in Spanish and based ONLY on this description: "${descripcion}". Do not invent features, materials, guarantees or claims that are not in it.`
-      : "Below the headline, leave clean space; do not invent features or claims.",
-    colores.length
-      ? `Under a small label "ELEGÍ LA TUYA", show the product side by side in these colors, each with its name in uppercase: ${colores.join(", ")}.`
-      : "",
-    talles ? `Show the size range prominently as "${talles}".` : "",
-    "At the bottom, a solid colored banner with a short Spanish call to action. Use a coherent brand color palette, modern bold sans-serif typography and correct Spanish spelling. No prices.",
+    "First, carefully read everything printed on the product and its package in the reference photo (brand, sizes, materials, features) and use that real information for the texts.",
+    descripcion ? `More real information from the seller: "${descripcion}".` : "",
+    colores.length ? `Real colors or models available: ${colores.join(", ")}.` : "",
+    talles ? `Real size range: "${talles}".` : "",
+    "LAYOUT: a soft, clean, light background with subtle decorative shapes. On the RIGHT, large and sharply detailed, the product exactly as in the reference, including its package with all printed text and logos fully legible; it must never be covered by any text or graphic. On the LEFT, from top to bottom: (1) a big bold two-color headline with the product name; (2) a rounded ribbon with a short catchy phrase about the main benefit; (3) the size range or key measure in large type, if known; (4) three benefit rows, each with a round flat icon, a bold uppercase title and one short explanatory line; (5) under the label \"ELEGÍ LA TUYA\", the product shown in each available color or model with its name in uppercase, if there is more than one.",
+    "Near the bottom, a small rounded box with a short persuasive question such as \"¿Te parece caro?\" and one line about the value it offers. At the very bottom, a full-width solid colored banner with a short Spanish call to action.",
+    "TEXT RULES: write every word in correct Spanish with perfect spelling and accents, double-check each word, keep every text short. Use only true information from the photo or the seller; do not invent features, materials, measurements, guarantees, certifications or claims. No prices, no discounts, no fake logos.",
+    "Use one coherent, attractive brand color palette that matches the product, modern bold sans-serif typography, strong contrast and an easy-to-read hierarchy on a phone.",
     `Compose it for ${formato}.`,
-    instruccionTexto(opciones),
-    opciones.extra?.trim() ? `IMPORTANT, the seller asks for this (written in Spanish), follow it closely as long as the product stays identical: ${opciones.extra.trim()}` : "",
+    opciones.extra?.trim() ? `IMPORTANT, the seller asks for this (written in Spanish), follow it closely, and write any text it asks for exactly as written: ${opciones.extra.trim()}` : "",
   ]
     .filter(Boolean)
     .join(" ");
