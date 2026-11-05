@@ -333,31 +333,38 @@ function promptDividida(opciones: OpcionesFoto, escena: string, formato: string)
     .join(" ");
 }
 
-// Ficha publicitaria tipo infografía, como la que arma Gemini con una sola foto:
-// título, frase, talles, beneficios con íconos, colores, cuadro de venta y
-// franja final. La IA lee el envase de la foto y usa solo datos reales.
+// Ficha publicitaria tipo infografía, como la que arma Gemini con una sola foto
+// (ejemplo de Uri: Plantillas Guapa). La IA mira la foto, lee el envase, escribe
+// ella misma los textos de venta y arma todo el diseño. El vendedor no escribe nada.
 function promptFicha(opciones: OpcionesFoto, formato: string) {
   const f = opciones.ficha || {};
   const descripcion = (f.descripcion || "").replace(/\s+/g, " ").trim().slice(0, 500);
   const colores = Array.from(new Set((f.colores || []).filter(Boolean))).slice(0, 4);
   const talles = rangoTalles(f.talles);
   return [
-    "Create a high-converting Spanish-language (Argentina) infographic advertising flyer for an online store, like a polished retail product sheet made by a professional graphic designer for Instagram.",
-    FIDELIDAD,
-    `Product: ${opciones.producto}.`,
-    "First, carefully read everything printed on the product and its package in the reference photo (brand, sizes, materials, features) and use that real information for the texts.",
-    descripcion ? `More real information from the seller: "${descripcion}".` : "",
-    colores.length ? `Real colors or models available: ${colores.join(", ")}.` : "",
-    talles ? `Real size range: "${talles}".` : "",
-    "LAYOUT: a soft, clean, light background with subtle decorative shapes. On the RIGHT, large and sharply detailed, the product exactly as in the reference, including its package with all printed text and logos fully legible; it must never be covered by any text or graphic. On the LEFT, from top to bottom: (1) a big bold two-color headline with the product name; (2) a rounded ribbon with a short catchy phrase about the main benefit; (3) the size range or key measure in large type, if known; (4) three benefit rows, each with a round flat icon, a bold uppercase title and one short explanatory line; (5) under the label \"ELEGÍ LA TUYA\", the product shown in each available color or model with its name in uppercase, if there is more than one.",
-    "Near the bottom, a small rounded box with a short persuasive question such as \"¿Te parece caro?\" and one line about the value it offers. At the very bottom, a full-width solid colored banner with a short Spanish call to action.",
-    "TEXT RULES: write every word in correct Spanish with perfect spelling and accents, double-check each word, keep every text short. Use only true information from the photo or the seller; do not invent features, materials, measurements, guarantees, certifications or claims. No prices, no discounts, no fake logos.",
-    "Use one coherent, attractive brand color palette that matches the product, modern bold sans-serif typography, strong contrast and an easy-to-read hierarchy on a phone.",
-    `Compose it for ${formato}.`,
-    opciones.extra?.trim() ? `IMPORTANT, the seller asks for this (written in Spanish), follow it closely, and write any text it asks for exactly as written: ${opciones.extra.trim()}` : "",
+    "Sos un diseñador gráfico experto en publicidad para tiendas online de Argentina. Con la foto del producto que te adjunto, creá UNA imagen publicitaria tipo ficha/infografía de venta, lista para publicar en Instagram, como la que haría una marca profesional.",
+    `Producto: ${opciones.producto}.`,
+    "Primero mirá bien la foto: identificá qué es el producto, para qué sirve y leé todo lo que dice el envase o la etiqueta (marca, talles, medidas, materiales, características). Usá esa información real para escribir los textos.",
+    descripcion ? `Datos del vendedor: ${descripcion}.` : "",
+    colores.length ? `Colores o modelos disponibles: ${colores.join(", ")}.` : "",
+    talles ? `Talles: ${talles}.` : "",
+    opciones.extra?.trim() ? `IMPORTANTE, el vendedor pide esto y tiene prioridad (si pide un texto, escribilo exactamente así): ${opciones.extra.trim()}` : "",
+    "DISEÑO (seguí esta estructura):",
+    "1) Fondo claro y limpio (crema o gris muy suave) con una superficie de madera abajo, luz de estudio suave.",
+    "2) A la DERECHA, grande, ocupando casi toda la altura: el producto en su envase, idéntico a la foto (misma forma, colores, logos y textos impresos, nítido y legible). No lo cambies ni lo tapes.",
+    "3) Arriba a la IZQUIERDA: el nombre del producto como título enorme en dos renglones y dos colores tomados del envase (ej.: primera palabra en un color oscuro y la marca en un color vivo), con un pequeño ícono relacionado.",
+    "4) Debajo, una cinta de color con una frase corta y pegadiza en mayúsculas sobre el beneficio principal, entre signos de exclamación (ej.: ¡UN TALLE PARA CADA PIE!).",
+    "5) Si el envase o los datos muestran talles o medidas, ponelos grandes debajo (ej.: DEL 34 AL 45).",
+    "6) Tres beneficios en columna, cada uno con un ícono redondo de color, un título corto en mayúsculas y negrita (ej.: COMODIDAD TODO EL DÍA) y una línea de explicación corta. Basalos en lo que es el producto y en lo que dice el envase (ej.: materiales).",
+    "7) Si hay más de un color o modelo, abajo a la izquierda: el texto \"ELEGÍ LA TUYA\" con una flechita y el producto suelto (sin envase) en cada color, con el nombre del color arriba de cada uno.",
+    "8) Abajo a la derecha, un recuadro blanco redondeado que responda una objeción de compra: título \"¿Te parece caro?\" y 3 o 4 renglones que expliquen el valor (calidad, duración, comodidad) con tono cercano, y debajo una cinta chica \"¡Estamos para ayudarte!\" con un corazón.",
+    "9) Abajo a la izquierda, una franja de color con un llamado a la acción en dos renglones, mayúsculas (ej.: ELEGÍ TU TALLE, / ELEGÍ TU CONFORT).",
+    "Usá una paleta de 2 o 3 colores que combine con el envase del producto, tipografía sans-serif moderna y gruesa, buena jerarquía y mucho contraste para leer en el celular.",
+    "TEXTOS: todo en español de Argentina (voseo: elegí, comprá, pedí), con ortografía y tildes perfectas; revisá cada palabra antes de escribirla. Frases cortas. No pongas precios ni descuentos, y no inventes datos técnicos, garantías ni certificaciones que no estén en la foto o en los datos del vendedor.",
+    `Formato: ${formato}.`,
   ]
     .filter(Boolean)
-    .join(" ");
+    .join("\n");
 }
 
 export function promptFoto(opciones: OpcionesFoto) {
