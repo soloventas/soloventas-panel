@@ -21,9 +21,12 @@ import {
   type PersonaId,
   type TextoPosId,
   type VideoTipoId,
+  rangoTalles,
 } from "@/lib/estudio";
 import Navegacion from "@/app/dashboard/edicion/navegacion";
 import { upload } from "@vercel/blob/client";
+import FichaForm from "./ficha-form";
+import { armarFichaDetallada, type DatosFichaFoto } from "@/lib/ficha-foto";
 import { armarCollage, detallesDeDescripcion, hayTexto, ponerTextoEnFoto, type TextoFoto } from "@/lib/texto-foto";
 import { MODELOS_GRATIS } from "@/lib/cloudflare-ia";
 import {
@@ -65,6 +68,7 @@ function nombreDeIA(modelo?: string) {
   if (!modelo) return "IA";
   if (modelo === "video-gratis-navegador") return "Video con tus fotos";
   if (modelo === "collage-navegador") return "Collage en tu panel";
+  if (modelo === "ficha-navegador") return "Foto detallada";
   return (
     MODELOS_GRATIS.find((m) => m.modelo === modelo)?.nombre ||
     MODELOS_AUTO.find((m) => m.endpoint === modelo)?.nombre ||
@@ -86,6 +90,8 @@ type Tarea = {
   panelVideo?: boolean;
   // Collage gratis: junta tus fotos reales en una sola imagen (sin IA).
   collage?: boolean;
+  // Foto detallada: ficha con título, talles, beneficios y colores (sin IA).
+  detallada?: boolean;
 };
 
 const ICONOS_FOTO: Record<FotoTipoId, string> = {
@@ -111,6 +117,15 @@ const TAREAS: Tarea[] = [
     ayuda: f.ayuda,
     recomendada: f.id === "pack",
   })),
+  {
+    id: "foto-detallada",
+    modo: "FOTO" as Modo,
+    fotoTipo: "mejorar" as FotoTipoId,
+    icono: "📋",
+    nombre: "Foto detallada",
+    ayuda: "Mandás la foto del producto y la IA arma sola un folleto de venta (como Gemini): título, talles, beneficios con íconos, colores y cuadro de venta. También la puede armar el panel gratis.",
+    detallada: true,
+  },
   {
     id: "foto-collage",
     modo: "FOTO" as Modo,
@@ -184,6 +199,17 @@ function Chip({
   );
 }
 
+// Lo que se le pide a la IA en la foto detallada: lo escrito + los datos reales.
+function extraDetallada(extra: string, detalles: string) {
+  const datos = detalles
+    .split("\n")
+    .map((d) => d.trim())
+    .filter(Boolean);
+  return [extra.trim(), datos.length ? `Datos reales del producto para usar en los textos: ${datos.join("; ")}` : ""]
+    .filter(Boolean)
+    .join(". ");
+}
+
 function TarjetaIA({
   activa,
   onClick,
@@ -230,6 +256,7 @@ export default function EstudioIA({
   productoId,
   producto,
   descripcion = "",
+  catalogo = { colores: [], talles: [] },
   fotos,
   falActivo,
   cfActivo = false,
@@ -243,6 +270,8 @@ export default function EstudioIA({
   producto: string;
   // Descripción del catálogo, para sugerir los detalles que van escritos en la foto.
   descripcion?: string;
+  // Colores y talles cargados en el catálogo (para la foto detallada).
+  catalogo?: { colores: string[]; talles: string[] };
   fotos: Media[];
   falActivo: boolean;
   cfActivo?: boolean;
@@ -277,10 +306,24 @@ export default function EstudioIA({
   // Con varias fotos marcadas: cada una se edita por separado y, si querés,
   // después se juntan las editadas en una sola imagen (collage).
   const [porSeparado, setPorSeparado] = useState(false);
+  // Foto detallada: la arma la IA (Nano Banana Pro, como Gemini) o el panel gratis.
+  const [detalladaIA, setDetalladaIA] = useState(falActivo);
   const [textoPublicacion, setTextoPublicacion] = useState("");
   const [avance, setAvance] = useState<string | null>(null);
   // Detalles escritos sobre la foto por el panel (uno por renglón).
   const [detallesTexto, setDetallesTexto] = useState("");
+  // Textos de la foto detallada: arrancan con los datos del catálogo.
+  const [ficha, setFicha] = useState<DatosFichaFoto>(() => ({
+    titulo: producto,
+    frase: "",
+    talles: rangoTalles(catalogo.talles),
+    beneficios: detallesDeDescripcion(descripcion, 3).map((d) => ({ titulo: d, texto: "" })),
+    colores: catalogo.colores.join(", "),
+    cajaTitulo: "",
+    cajaTexto: "",
+    cta: "Consultanos ahora",
+    paleta: "violeta",
+  }));
   // Página web de donde traer los detalles (por ejemplo, la del fabricante).
   const [paginaWeb, setPaginaWeb] = useState("");
   const [leyendoPagina, setLeyendoPagina] = useState(false);
@@ -319,9 +362,12 @@ export default function EstudioIA({
   const fotoTipo: FotoTipoId = tarea.fotoTipo || "pack";
   const videoTipo: VideoTipoId = tarea.videoTipo || "giro";
   const herramientaFoto = FOTO_TIPOS.find((f) => f.id === fotoTipo)!;
-  const esCollage = Boolean(tarea.collage);
-  const usaEscena = esCollage ? false : modo === "VIDEO" ? !tarea.panelVideo : herramientaFoto.usaEscena;
-  const usaPersona = esCollage
+  const esDetallada = Boolean(tarea.detallada);
+  const detalladaConIA = esDetallada && detalladaIA;
+  // Hechas por el panel, sin IA: el collage y la foto detallada armada por el panel.
+  const esCollage = Boolean(tarea.collage) || (esDetallada && !detalladaConIA);
+  const usaEscena = esCollage || esDetallada ? false : modo === "VIDEO" ? !tarea.panelVideo : herramientaFoto.usaEscena;
+  const usaPersona = esCollage || esDetallada
     ? false
     : modo === "FOTO"
     ? herramientaFoto.usaPersona
@@ -340,6 +386,19 @@ export default function EstudioIA({
   }, [fotos]);
 
   const prompts = useMemo(() => {
+    if (detalladaConIA) {
+      return promptsFotos("escena", {
+        producto,
+        escena: "estudio",
+        escenaPersonalizada: "",
+        persona: "ninguna",
+        formato,
+        extra: extraDetallada(extra, detallesTexto),
+        texto: "",
+        textoPos,
+        estilos: ["ficha"],
+      }).map((p) => ({ ...p, titulo: "Foto detallada con IA" }));
+    }
     if (modo === "FOTO") {
       return promptsFotos(fotoTipo, {
         producto,
@@ -370,7 +429,7 @@ export default function EstudioIA({
         }),
       },
     ];
-  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra, texto, textoPos, estilos, accion, detalle]);
+  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra, texto, textoPos, estilos, accion, detalle, detalladaConIA, detallesTexto]);
 
   const herramientas = herramientasPara(modo);
   const modelos = modelosPara(modo);
@@ -381,7 +440,9 @@ export default function EstudioIA({
   const herramientasVisibles = verTodas
     ? herramientas
     : herramientas.filter((h, i) => i < VISIBLES || (eleccion.clase === "gratis" && h.id === herramienta.id));
-  const modelo = buscarModelo(modo, eleccion.clase === "paga" ? eleccion.id : undefined);
+  const modelo = detalladaConIA
+    ? buscarModelo("FOTO", "nano-banana-pro")
+    : buscarModelo(modo, eleccion.clase === "paga" ? eleccion.id : undefined);
   const modeloGratis = MODELOS_GRATIS.find((m) => m.id === eleccion.id) || MODELOS_GRATIS[0];
   const textoFoto: TextoFoto = {
     titulo: limpiarEspacios(texto),
@@ -391,7 +452,7 @@ export default function EstudioIA({
   // Las fotos que de verdad se usan con la tarea elegida.
   const usadas = panelVideo ? seleccion : seleccion.slice(0, MAX_FOTOS_IA);
   // Grupos de fotos que se mandan a la IA: cada foto sola, o todas juntas.
-  const separar = modo === "FOTO" && !esCollage && usadas.length > 1;
+  const separar = modo === "FOTO" && !esCollage && !esDetallada && usadas.length > 1;
   const juntarDespues = separar && !porSeparado;
   const grupos = separar ? usadas.map((id) => [id]) : [usadas];
   const nombrePanel = modo === "VIDEO" ? VIDEO_PANEL.nombre : modeloGratis.nombre;
@@ -460,6 +521,12 @@ export default function EstudioIA({
       return;
     }
     setDetallesTexto((data.detalles as string[]).join("\n"));
+    if (esDetallada) {
+      setFicha((f) => ({
+        ...f,
+        beneficios: (data.detalles as string[]).slice(0, 4).map((d) => ({ titulo: d, texto: "" })),
+      }));
+    }
   }
 
   function elegirIA(e: EleccionIA) {
@@ -521,7 +588,8 @@ export default function EstudioIA({
   }
 
   const problemaOpciones = (() => {
-    if (esCollage && seleccion.length < 2)
+    if (esDetallada && !detalladaConIA && !ficha.titulo.trim()) return "Escribí el título de la foto detallada.";
+    if (esCollage && !esDetallada && seleccion.length < 2)
       return "Para juntar fotos marcá al menos 2 en el paso 3.";
     if (modo === "VIDEO" && videoTipo === "colores" && seleccion.length < 2)
       return "Para el cambio de color marcá 2 fotos en distintos colores (paso 3).";
@@ -531,6 +599,8 @@ export default function EstudioIA({
   })();
   const problema = seleccion.length === 0 ? "Elegí al menos una foto de base (paso 3)." : problemaOpciones;
   const problemaIA = (() => {
+    if (detalladaConIA)
+      return falActivo ? null : "Para la foto detallada con IA conectá fal.ai en el paso 1 · Conectar IAs.";
     if (esCollage) return null;
     if (ia[modo].clase === "panel" && modo === "FOTO" && !cfActivo)
       return "Para usar la IA gratis conectala en el paso 1 · Conectar IAs.";
@@ -543,8 +613,9 @@ export default function EstudioIA({
 
   async function generar() {
     if (problema) return;
-    const que =
-      modo === "FOTO"
+    const que = detalladaConIA
+      ? "1 foto detallada"
+      : modo === "FOTO"
         ? cantidadFotos > 1
           ? `${cantidadFotos} fotos (${prompts.map((p) => p.titulo.toLowerCase()).join(", ")}${
               separar ? `, para cada una de las ${grupos.length} fotos` : ""
@@ -566,24 +637,25 @@ export default function EstudioIA({
         tipo: modo,
         mediaIds: lotes[i],
         modeloId: modelo.id,
-        fotoTipo,
-        escena,
-        escenaPersonalizada,
-        persona,
+        // La foto detallada con IA: folleto de venta hecho por la IA con la foto real.
+        fotoTipo: detalladaConIA ? "escena" : fotoTipo,
+        escena: detalladaConIA ? "estudio" : escena,
+        escenaPersonalizada: detalladaConIA ? "" : escenaPersonalizada,
+        persona: detalladaConIA ? "ninguna" : persona,
         formato,
         videoTipo,
         duracion,
-        extra,
+        extra: detalladaConIA ? extraDetallada(extra, detallesTexto) : extra,
         accion,
         detalle,
         // En las fotos el texto lo escribe el panel después (la IA escribe con faltas).
         texto: modo === "FOTO" ? "" : texto,
         textoPos,
-        estilos,
+        estilos: detalladaConIA ? ["ficha"] : estilos,
       }),
     });
     const data = await r.json().catch(() => ({}));
-    if (r.ok && modo === "FOTO" && hayTexto(textoFoto) && Array.isArray(data)) {
+    if (r.ok && modo === "FOTO" && !detalladaConIA && hayTexto(textoFoto) && Array.isArray(data)) {
       (data as { id: string }[]).forEach((t) => textoPendiente.current.set(t.id, textoFoto));
     }
     if (!r.ok) {
@@ -691,7 +763,21 @@ export default function EstudioIA({
     setEnviando(true);
     setDesde(Date.now());
     try {
-      await guardarCollage(seleccionadas.map((f) => f.url));
+      if (esDetallada) {
+        const foto = await armarFichaDetallada(
+          ficha,
+          seleccionadas[0].url,
+          seleccionadas.slice(1).map((f) => f.url)
+        );
+        const form = new FormData();
+        form.append("datos", JSON.stringify({ accion: "collage", productoId, modelo: "ficha-navegador" }));
+        form.append("foto", foto, "foto-detallada.jpg");
+        const r = await fetch("/api/ia/gratis", { method: "POST", body: form });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || "No se pudo guardar la foto detallada.");
+      } else {
+        await guardarCollage(seleccionadas.map((f) => f.url));
+      }
       await cargarTrabajos();
       await onNuevos();
       irA(7);
@@ -871,6 +957,7 @@ export default function EstudioIA({
 
   // Paso 8: repetir la misma edición con las mismas opciones.
   function hacerDeNuevo() {
+    if (detalladaConIA) return generar();
     if (esCollage) return armarCollageGratis();
     if (eleccion.clase === "paga") return generar();
     if (modo === "VIDEO") return armarVideoGratis();
@@ -940,9 +1027,13 @@ export default function EstudioIA({
       {/* Paso 4 · Qué hacer y modelo */}
       {paso === 4 && (
         <>
-          <p className="text-sm font-semibold text-navy">¿Qué querés hacer?</p>
+          {(["FOTO", "VIDEO"] as Modo[]).map((grupo) => (
+          <div key={grupo} className="flex flex-col gap-2">
+          <p className="text-sm font-semibold text-navy">
+            {grupo === "FOTO" ? "📷 Fotos · ¿qué querés hacer?" : "🎬 Videos · ¿qué querés hacer?"}
+          </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {tareas.map((t) => (
+            {tareas.filter((t) => t.modo === grupo).map((t) => (
               <button
                 key={t.id}
                 type="button"
@@ -956,12 +1047,11 @@ export default function EstudioIA({
                   {t.recomendada && "⭐ "}
                   {t.nombre}
                 </span>
-                <span className="block text-[10px] uppercase tracking-wide text-gray-400 mt-0.5">
-                  {t.modo === "FOTO" ? "Foto" : "Video"}
-                </span>
               </button>
             ))}
           </div>
+          </div>
+          ))}
           <p className="text-xs text-gray-500">{tarea.ayuda}</p>
           {modo === "FOTO" && !esCollage && Math.min(seleccion.length, MAX_FOTOS_IA) > 1 && (
             <div>
@@ -1108,19 +1198,55 @@ export default function EstudioIA({
       )}
 
       {/* Paso 5 · IA */}
-      {paso === 5 && esCollage && (
+      {paso === 5 && esDetallada && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <TarjetaIA
+              activa={detalladaIA}
+              onClick={() => setDetalladaIA(true)}
+              nombre="Con IA · Nano Banana Pro"
+              empresa="Google Gemini"
+              detalle="La IA mira tu foto y arma sola el folleto completo, como en Gemini: diseño, íconos, colores y textos."
+              etiqueta={costoTexto(buscarModelo("FOTO", "nano-banana-pro"), "FOTO", duracion, 1)}
+              recomendada
+              apagada={!falActivo}
+            />
+            <TarjetaIA
+              activa={!detalladaIA}
+              onClick={() => setDetalladaIA(false)}
+              nombre="Armada por el panel"
+              empresa="Solo Ventas"
+              detalle="Gratis. Usa tu foto real y un diseño fijo; vos escribís cada texto."
+              etiqueta="Gratis"
+            />
+          </div>
+          {detalladaIA && !falActivo && (
+            <p className="text-[11px] text-amber-700">
+              Para usar la IA conectá fal.ai en el Paso 1 · Conectar IAs (se paga por foto en tu cuenta de fal.ai).
+            </p>
+          )}
+          <Navegacion
+            onAtras={() => irA(4)}
+            onSiguiente={() => irA(6)}
+            deshabilitado={Boolean(problemaIA)}
+            aviso={problemaIA}
+          />
+        </>
+      )}
+      {paso === 5 && esCollage && !esDetallada && (
         <>
           <div className="rounded-lg border-2 border-navy bg-navy/5 p-3">
             <p className="text-sm font-semibold text-gray-900">⭐ Lo arma tu panel · Gratis</p>
             <p className="text-xs text-gray-600 mt-0.5">
-              Para juntar fotos no hace falta IA: el panel pone tus {Math.min(seleccion.length, MAX_FOTOS_IA)} fotos reales
-              en una sola imagen, sin cambiarlas, y escribe el texto sin faltas.
+              {esDetallada
+                ? "La foto detallada no usa IA: el panel arma la ficha con tu foto real y escribe todos los textos sin faltas."
+                : `Para juntar fotos no hace falta IA: el panel pone tus ${Math.min(seleccion.length, MAX_FOTOS_IA)} fotos reales en una sola imagen, sin cambiarlas, y escribe el texto sin faltas.`}
             </p>
           </div>
           <Navegacion onAtras={() => irA(4)} onSiguiente={() => irA(6)} />
         </>
       )}
-      {paso === 5 && !esCollage && (
+      {paso === 5 && !esCollage && !esDetallada && (
         <>
           {(modo === "FOTO" || panelVideo) && (
             <div>
@@ -1224,64 +1350,17 @@ export default function EstudioIA({
             </div>
           )}
 
-          <div>
-            <p className="text-xs font-medium text-gray-700 mb-1.5">
-              Texto escrito {modo === "FOTO" ? "sobre la foto" : "en el video"} (opcional)
-            </p>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                value={texto}
-                onChange={(e) => setTexto(e.target.value.slice(0, 80))}
-                placeholder="Ej.: NUEVO INGRESO · Consultá precio"
-                className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-              />
-              <div className="flex gap-2">
-                <Chip activo={textoPos === "arriba"} onClick={() => setTextoPos("arriba")}>
-                  Arriba
-                </Chip>
-                <Chip activo={textoPos === "abajo"} onClick={() => setTextoPos("abajo")}>
-                  Abajo
-                </Chip>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2 mt-1.5">
-              {[producto, "Nuevo ingreso", "Consultá precio", "www.soloventas.com.ar"].map((t) => (
-                <Chip key={t} activo={texto === t} onClick={() => setTexto(texto === t ? "" : t)}>
-                  {t}
-                </Chip>
-              ))}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              {panelVideo
-                ? "Aparece animado sobre las fotos, con la animación que elijas abajo."
-                : modo === "FOTO"
-                ? "Lo escribe el panel arriba de la foto, letra por letra como lo pusiste: sin faltas de ortografía."
-                : "La IA de video lo escribe en el video."}{" "}
-              Dejalo vacío si no querés texto.
-            </p>
-          </div>
-
-          {modo === "FOTO" && (
-            <div>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-                <p className="text-xs font-medium text-gray-700">
-                  Detalles del producto escritos en la foto (opcional · uno por renglón)
-                </p>
-                {descripcion.trim() && (
-                  <button
-                    type="button"
-                    onClick={() => setDetallesTexto(detallesDeDescripcion(descripcion).join("\n"))}
-                    className="text-xs font-semibold text-navy underline"
-                  >
-                    Usar la descripción del catálogo
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-col sm:flex-row gap-2 mb-2">
+          {detalladaConIA && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-gray-600">
+                La IA lee lo que dice el envase de tu foto y lo que tenés cargado en el catálogo. Si querés,
+                sumale datos reales acá: lo que escribas lo respeta.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   value={paginaWeb}
                   onChange={(e) => setPaginaWeb(e.target.value)}
-                  placeholder="Traer de una página web, ej.: www.evubarista.com.ar"
+                  placeholder="Traer datos de una página web, ej.: www.evubarista.com.ar"
                   className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
                 />
                 <button
@@ -1293,32 +1372,157 @@ export default function EstudioIA({
                   {leyendoPagina ? "Leyendo la página..." : "🌐 Traer detalles"}
                 </button>
               </div>
-              <textarea
-                value={detallesTexto}
-                onChange={(e) => setDetallesTexto(e.target.value.slice(0, 600))}
-                rows={4}
-                placeholder={"Ej.:\nMolinillo de café incorporado\nPrepara espresso, capuchino y latte\nPanel táctil fácil de usar"}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Aparecen abajo de la foto con un ✔ cada uno. Los escribe el panel tal cual, así que
-                revisá que estén bien escritos.
-              </p>
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-1.5">
+                  Datos reales del producto (opcional · uno por renglón)
+                </p>
+                <textarea
+                  value={detallesTexto}
+                  onChange={(e) => setDetallesTexto(e.target.value.slice(0, 600))}
+                  rows={4}
+                  placeholder={"Ej.:\nTalles del 34 al 45\nMaterial piqué o toalla\nColores negro y blanco"}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                />
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-1.5">
+                  ¿Cómo la querés? (opcional)
+                </p>
+                <textarea
+                  value={extra}
+                  onChange={(e) => setExtra(e.target.value.slice(0, 400))}
+                  rows={3}
+                  placeholder="Ej.: tonos violeta, que diga ¡Un talle para cada pie!, la frase de abajo: Elegí tu talle, elegí tu confort"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Si en el resultado ves un dato que no es real o una palabra mal escrita, corregilo acá y
+                  tocá Hacer de nuevo en el paso 8.
+                </p>
+              </div>
             </div>
           )}
+          {esDetallada && !detalladaConIA && (
+            <>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  value={paginaWeb}
+                  onChange={(e) => setPaginaWeb(e.target.value)}
+                  placeholder="Traer beneficios de una página web, ej.: www.evubarista.com.ar"
+                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                />
+                <button
+                  type="button"
+                  onClick={traerDePagina}
+                  disabled={!paginaWeb.trim() || leyendoPagina}
+                  className="shrink-0 rounded-md border border-navy text-navy text-sm font-semibold px-3 py-2 hover:bg-navy/5 disabled:opacity-50"
+                >
+                  {leyendoPagina ? "Leyendo la página..." : "🌐 Traer detalles"}
+                </button>
+              </div>
+              <FichaForm datos={ficha} onCambio={setFicha} />
+            </>
+          )}
+          {!esDetallada && (
+            <>
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">
+                Texto escrito {modo === "FOTO" ? "sobre la foto" : "en el video"} (opcional)
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  value={texto}
+                  onChange={(e) => setTexto(e.target.value.slice(0, 80))}
+                  placeholder="Ej.: NUEVO INGRESO · Consultá precio"
+                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                />
+                <div className="flex gap-2">
+                  <Chip activo={textoPos === "arriba"} onClick={() => setTextoPos("arriba")}>
+                    Arriba
+                  </Chip>
+                  <Chip activo={textoPos === "abajo"} onClick={() => setTextoPos("abajo")}>
+                    Abajo
+                  </Chip>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 mt-1.5">
+                {[producto, "Nuevo ingreso", "Consultá precio", "www.soloventas.com.ar"].map((t) => (
+                  <Chip key={t} activo={texto === t} onClick={() => setTexto(texto === t ? "" : t)}>
+                    {t}
+                  </Chip>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {panelVideo
+                  ? "Aparece animado sobre las fotos, con la animación que elijas abajo."
+                  : modo === "FOTO"
+                  ? "Lo escribe el panel arriba de la foto, letra por letra como lo pusiste: sin faltas de ortografía."
+                  : "La IA de video lo escribe en el video."}{" "}
+                Dejalo vacío si no querés texto.
+              </p>
+            </div>
 
-          <div>
-            <p className="text-xs font-medium text-gray-700 mb-1.5">
-              ¿Qué querés que cambie en la foto? (opcional)
-            </p>
-            <textarea
-              value={extra}
-              onChange={(e) => setExtra(e.target.value.slice(0, 400))}
-              rows={3}
-              placeholder="Escribí lo que la IA tiene que hacer en la imagen. Ej.: fondo de playa al atardecer, tonos pastel, que se vea bien el logo, la modelo sonriendo"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
-            />
-          </div>
+            {modo === "FOTO" && (
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                  <p className="text-xs font-medium text-gray-700">
+                    Detalles del producto escritos en la foto (opcional · uno por renglón)
+                  </p>
+                  {descripcion.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => setDetallesTexto(detallesDeDescripcion(descripcion).join("\n"))}
+                      className="text-xs font-semibold text-navy underline"
+                    >
+                      Usar la descripción del catálogo
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2 mb-2">
+                  <input
+                    value={paginaWeb}
+                    onChange={(e) => setPaginaWeb(e.target.value)}
+                    placeholder="Traer de una página web, ej.: www.evubarista.com.ar"
+                    className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                  />
+                  <button
+                    type="button"
+                    onClick={traerDePagina}
+                    disabled={!paginaWeb.trim() || leyendoPagina}
+                    className="shrink-0 rounded-md border border-navy text-navy text-sm font-semibold px-3 py-2 hover:bg-navy/5 disabled:opacity-50"
+                  >
+                    {leyendoPagina ? "Leyendo la página..." : "🌐 Traer detalles"}
+                  </button>
+                </div>
+                <textarea
+                  value={detallesTexto}
+                  onChange={(e) => setDetallesTexto(e.target.value.slice(0, 600))}
+                  rows={4}
+                  placeholder={"Ej.:\nMolinillo de café incorporado\nPrepara espresso, capuchino y latte\nPanel táctil fácil de usar"}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Aparecen abajo de la foto con un ✔ cada uno. Los escribe el panel tal cual, así que
+                  revisá que estén bien escritos.
+                </p>
+              </div>
+            )}
+
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1.5">
+                ¿Qué querés que cambie en la foto? (opcional)
+              </p>
+              <textarea
+                value={extra}
+                onChange={(e) => setExtra(e.target.value.slice(0, 400))}
+                rows={3}
+                placeholder="Escribí lo que la IA tiene que hacer en la imagen. Ej.: fondo de playa al atardecer, tonos pastel, que se vea bien el logo, la modelo sonriendo"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+              />
+            </div>
+            </>
+          )}
+
           <div>
             <p className="text-xs font-medium text-gray-700 mb-1.5">
               Descripción y detalles para la publicación (opcional)
@@ -1458,7 +1662,25 @@ export default function EstudioIA({
           {problema && <p className="text-sm text-amber-700">{problema}</p>}
 
           {/* 5. Hacerlo */}
-          {esCollage ? (
+          {detalladaConIA ? (
+            <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={generar}
+                disabled={Boolean(problema) || Boolean(problemaIA) || enviando}
+                className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+              >
+                {enviando
+                  ? "Enviando a la IA..."
+                  : resultados.length > 0
+                  ? "↻ Crear otra foto detallada con IA"
+                  : "📋 Crear foto detallada con IA"}
+              </button>
+              <span className="text-xs text-green-900">
+                Nano Banana Pro · {costo} · tarda alrededor de un minuto
+              </span>
+            </div>
+          ) : esCollage ? (
             <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-wrap items-center gap-3">
               <button
                 type="button"
@@ -1466,7 +1688,15 @@ export default function EstudioIA({
                 disabled={Boolean(problema) || enviando}
                 className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
               >
-                {enviando ? "Armando..." : resultados.length > 0 ? "↻ Armar otro collage" : "🧩 Juntar las fotos"}
+                {enviando
+                  ? "Armando..."
+                  : esDetallada
+                  ? resultados.length > 0
+                    ? "↻ Armar otra foto detallada"
+                    : "📋 Crear foto detallada"
+                  : resultados.length > 0
+                  ? "↻ Armar otro collage"
+                  : "🧩 Juntar las fotos"}
               </button>
               <span className="text-xs text-green-900">Gratis · tarda unos segundos</span>
             </div>
