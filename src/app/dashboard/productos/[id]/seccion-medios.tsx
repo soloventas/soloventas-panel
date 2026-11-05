@@ -13,6 +13,7 @@ export default function SeccionMedios({
   productoId,
   producto,
   descripcion = "",
+  catalogo,
   inicial,
   redes,
   iaActiva,
@@ -24,6 +25,7 @@ export default function SeccionMedios({
   productoId: string;
   producto: string;
   descripcion?: string;
+  catalogo?: { colores: string[]; talles: string[] };
   inicial: Media[];
   redes: { instagram: string | null; facebook: string | null; tiktok: string | null };
   iaActiva: boolean;
@@ -73,6 +75,7 @@ export default function SeccionMedios({
         productoId={productoId}
         producto={producto}
         descripcion={descripcion}
+        catalogo={catalogo}
         fotos={fotosBase}
         falActivo={falActivo}
         cfActivo={cfActivo}
