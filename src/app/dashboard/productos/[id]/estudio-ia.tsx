@@ -69,6 +69,8 @@ function nombreDeIA(modelo?: string) {
   if (modelo === "video-gratis-navegador") return "Video con tus fotos";
   if (modelo === "collage-navegador") return "Collage en tu panel";
   if (modelo === "ficha-navegador") return "Foto detallada";
+  if (modelo === "gemini-detallada") return "Foto detallada · Gemini";
+  if (modelo === "gemini-web") return "Gemini";
   return (
     MODELOS_GRATIS.find((m) => m.modelo === modelo)?.nombre ||
     MODELOS_AUTO.find((m) => m.endpoint === modelo)?.nombre ||
@@ -306,8 +308,10 @@ export default function EstudioIA({
   // Con varias fotos marcadas: cada una se edita por separado y, si querés,
   // después se juntan las editadas en una sola imagen (collage).
   const [porSeparado, setPorSeparado] = useState(false);
-  // Foto detallada: la arma la IA (Nano Banana Pro, como Gemini) o el panel gratis.
-  const [detalladaIA, setDetalladaIA] = useState(falActivo);
+  // Foto detallada: gratis en Gemini (la pegás vos), con IA paga dentro del panel
+  // (Nano Banana Pro, la misma de Gemini) o armada por el panel con diseño fijo.
+  const [modoDetallada, setModoDetallada] = useState<"gemini" | "ia" | "panel">("gemini");
+  const [subiendo, setSubiendo] = useState(false);
   const [textoPublicacion, setTextoPublicacion] = useState("");
   const [avance, setAvance] = useState<string | null>(null);
   // Detalles escritos sobre la foto por el panel (uno por renglón).
@@ -363,9 +367,12 @@ export default function EstudioIA({
   const videoTipo: VideoTipoId = tarea.videoTipo || "giro";
   const herramientaFoto = FOTO_TIPOS.find((f) => f.id === fotoTipo)!;
   const esDetallada = Boolean(tarea.detallada);
-  const detalladaConIA = esDetallada && detalladaIA;
+  const detalladaConIA = esDetallada && modoDetallada === "ia";
+  const detalladaGemini = esDetallada && modoDetallada === "gemini";
+  // Las dos que hace una IA a partir de la foto (folleto tipo Gemini).
+  const fichaIA = detalladaConIA || detalladaGemini;
   // Hechas por el panel, sin IA: el collage y la foto detallada armada por el panel.
-  const esCollage = Boolean(tarea.collage) || (esDetallada && !detalladaConIA);
+  const esCollage = Boolean(tarea.collage) || (esDetallada && modoDetallada === "panel");
   const usaEscena = esCollage || esDetallada ? false : modo === "VIDEO" ? !tarea.panelVideo : herramientaFoto.usaEscena;
   const usaPersona = esCollage || esDetallada
     ? false
@@ -386,7 +393,7 @@ export default function EstudioIA({
   }, [fotos]);
 
   const prompts = useMemo(() => {
-    if (detalladaConIA) {
+    if (fichaIA) {
       return promptsFotos("escena", {
         producto,
         escena: "estudio",
@@ -429,7 +436,7 @@ export default function EstudioIA({
         }),
       },
     ];
-  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra, texto, textoPos, estilos, accion, detalle, detalladaConIA, detallesTexto]);
+  }, [modo, fotoTipo, producto, escena, escenaPersonalizada, persona, formato, videoTipo, extra, texto, textoPos, estilos, accion, detalle, fichaIA, detallesTexto]);
 
   const herramientas = herramientasPara(modo);
   const modelos = modelosPara(modo);
@@ -588,7 +595,7 @@ export default function EstudioIA({
   }
 
   const problemaOpciones = (() => {
-    if (esDetallada && !detalladaConIA && !ficha.titulo.trim()) return "Escribí el título de la foto detallada.";
+    if (esDetallada && !fichaIA && !ficha.titulo.trim()) return "Escribí el título de la foto detallada.";
     if (esCollage && !esDetallada && seleccion.length < 2)
       return "Para juntar fotos marcá al menos 2 en el paso 3.";
     if (modo === "VIDEO" && videoTipo === "colores" && seleccion.length < 2)
@@ -599,6 +606,7 @@ export default function EstudioIA({
   })();
   const problema = seleccion.length === 0 ? "Elegí al menos una foto de base (paso 3)." : problemaOpciones;
   const problemaIA = (() => {
+    if (detalladaGemini) return null;
     if (detalladaConIA)
       return falActivo ? null : "Para la foto detallada con IA conectá fal.ai en el paso 1 · Conectar IAs.";
     if (esCollage) return null;
@@ -956,7 +964,64 @@ export default function EstudioIA({
   const ultimos = nuevos.length > 0 ? nuevos : resultados.slice(0, 6);
 
   // Paso 8: repetir la misma edición con las mismas opciones.
+  // Sube la foto que hiciste en Gemini (u otra web gratis) y la deja en los resultados.
+  async function subirResultadoWeb(archivos: FileList | null) {
+    if (!archivos || archivos.length === 0) return;
+    setError("");
+    setSubiendo(true);
+    setDesde(Date.now());
+    try {
+      const ids: string[] = [];
+      for (const archivo of Array.from(archivos).slice(0, 4)) {
+        const temporal = URL.createObjectURL(archivo);
+        const foto = await achicarFoto(temporal, 2048);
+        URL.revokeObjectURL(temporal);
+        const form = new FormData();
+        form.append(
+          "datos",
+          JSON.stringify({ accion: "collage", productoId, modelo: esDetallada ? "gemini-detallada" : "gemini-web" })
+        );
+        form.append("foto", foto, "gemini.jpg");
+        const r = await fetch("/api/ia/gratis", { method: "POST", body: form });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || "No se pudo subir la foto.");
+        if (data.mediaId) ids.push(data.mediaId);
+      }
+      // En las fotos comunes, el texto lo escribe el panel sin faltas.
+      if (!esDetallada && hayTexto(textoFoto)) await escribirTexto(ids, textoFoto);
+      await cargarTrabajos();
+      await onNuevos();
+      irA(7);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo subir la foto.");
+    }
+    setSubiendo(false);
+  }
+
+  const cajaSubirResultado = (
+    <label className="flex flex-col gap-1.5 rounded-md border-2 border-dashed border-green-400 bg-white p-3 cursor-pointer hover:bg-green-50">
+      <span className="text-sm font-semibold text-green-900">
+        {subiendo ? "Subiendo..." : "📥 Subí acá la foto que te hizo Gemini"}
+      </span>
+      <span className="text-xs text-green-900/80">
+        Queda en Resultados y desde el paso 8 la publicás en tus redes.
+      </span>
+      <input
+        type="file"
+        accept="image/*"
+        multiple
+        disabled={subiendo}
+        onChange={(e) => {
+          subirResultadoWeb(e.target.files);
+          e.target.value = "";
+        }}
+        className="text-xs"
+      />
+    </label>
+  );
+
   function hacerDeNuevo() {
+    if (detalladaGemini || (eleccion.clase === "gratis" && !esDetallada)) return irA(6);
     if (detalladaConIA) return generar();
     if (esCollage) return armarCollageGratis();
     if (eleccion.clase === "paga") return generar();
@@ -1200,27 +1265,35 @@ export default function EstudioIA({
       {/* Paso 5 · IA */}
       {paso === 5 && esDetallada && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <TarjetaIA
-              activa={detalladaIA}
-              onClick={() => setDetalladaIA(true)}
-              nombre="Con IA · Nano Banana Pro"
-              empresa="Google Gemini"
-              detalle="La IA mira tu foto y arma sola el folleto completo, como en Gemini: diseño, íconos, colores y textos."
-              etiqueta={costoTexto(buscarModelo("FOTO", "nano-banana-pro"), "FOTO", duracion, 1)}
+              activa={modoDetallada === "gemini"}
+              onClick={() => setModoDetallada("gemini")}
+              nombre="Gratis en Gemini"
+              empresa="Google"
+              detalle="Como lo hiciste vos: el panel te da la foto y la instrucción, la pegás en Gemini y subís acá el resultado."
+              etiqueta="Gratis"
               recomendada
+            />
+            <TarjetaIA
+              activa={modoDetallada === "ia"}
+              onClick={() => setModoDetallada("ia")}
+              nombre="Con IA dentro del panel"
+              empresa="Nano Banana Pro · la de Gemini"
+              detalle="Lo hace solo con un clic, sin salir de tu página."
+              etiqueta={costoTexto(buscarModelo("FOTO", "nano-banana-pro"), "FOTO", duracion, 1)}
               apagada={!falActivo}
             />
             <TarjetaIA
-              activa={!detalladaIA}
-              onClick={() => setDetalladaIA(false)}
+              activa={modoDetallada === "panel"}
+              onClick={() => setModoDetallada("panel")}
               nombre="Armada por el panel"
               empresa="Solo Ventas"
-              detalle="Gratis. Usa tu foto real y un diseño fijo; vos escribís cada texto."
+              detalle="Gratis, con un diseño fijo y tu foto real. Vos escribís cada texto."
               etiqueta="Gratis"
             />
           </div>
-          {detalladaIA && !falActivo && (
+          {modoDetallada === "ia" && !falActivo && (
             <p className="text-[11px] text-amber-700">
               Para usar la IA conectá fal.ai en el Paso 1 · Conectar IAs (se paga por foto en tu cuenta de fal.ai).
             </p>
@@ -1265,19 +1338,29 @@ export default function EstudioIA({
                     recomendada
                   />
                 ) : (
-                  MODELOS_GRATIS.map((m) => (
+                  <>
+                    {MODELOS_GRATIS.map((m) => (
+                      <TarjetaIA
+                        key={m.id}
+                        activa={eleccion.clase === "panel" && modeloGratis.id === m.id}
+                        onClick={() => elegirIA({ clase: "panel", id: m.id })}
+                        nombre={m.nombre}
+                        empresa={m.empresa}
+                        detalle={`${m.nota} ${m.porDia}.`}
+                        etiqueta="Gratis"
+                        recomendada={m.recomendado}
+                        apagada={!cfActivo}
+                      />
+                    ))}
                     <TarjetaIA
-                      key={m.id}
-                      activa={eleccion.clase === "panel" && modeloGratis.id === m.id}
-                      onClick={() => elegirIA({ clase: "panel", id: m.id })}
-                      nombre={m.nombre}
-                      empresa={m.empresa}
-                      detalle={`${m.nota} ${m.porDia}.`}
+                      activa={eleccion.clase === "gratis" && eleccion.id === "gemini"}
+                      onClick={() => elegirIA({ clase: "gratis", id: "gemini" })}
+                      nombre="Gemini (en su página)"
+                      empresa="Google"
+                      detalle="Gratis con tu cuenta de Google: copiás la instrucción, la pegás en Gemini y subís acá el resultado."
                       etiqueta="Gratis"
-                      recomendada={m.recomendado}
-                      apagada={!cfActivo}
                     />
-                  ))
+                  </>
                 )}
               </div>
               {modo === "FOTO" && !cfActivo && (
@@ -1350,7 +1433,7 @@ export default function EstudioIA({
             </div>
           )}
 
-          {detalladaConIA && (
+          {fichaIA && (
             <div className="flex flex-col gap-3">
               <p className="text-xs text-gray-600">
                 La IA lee lo que dice el envase de tu foto y lo que tenés cargado en el catálogo. Si querés,
@@ -1397,12 +1480,12 @@ export default function EstudioIA({
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   Si en el resultado ves un dato que no es real o una palabra mal escrita, corregilo acá y
-                  tocá Hacer de nuevo en el paso 8.
+                  volvé a hacerla.
                 </p>
               </div>
             </div>
           )}
-          {esDetallada && !detalladaConIA && (
+          {esDetallada && !fichaIA && (
             <>
               <div className="flex flex-col sm:flex-row gap-2">
                 <input
@@ -1662,7 +1745,51 @@ export default function EstudioIA({
           {problema && <p className="text-sm text-amber-700">{problema}</p>}
 
           {/* 5. Hacerlo */}
-          {detalladaConIA ? (
+          {detalladaGemini ? (
+            <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-green-900">Hacela gratis en Gemini</p>
+                <a
+                  href="https://gemini.google.com/app"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-md bg-green-700 text-white text-xs font-semibold px-3 py-1.5 hover:opacity-90"
+                >
+                  Abrir Gemini ↗
+                </a>
+              </div>
+              <ol className="text-sm text-green-950 list-decimal pl-5 flex flex-col gap-1">
+                <li>
+                  Guardá la foto del producto:{" "}
+                  {seleccionadas.slice(0, 1).map((f) => (
+                    <a key={f.id} href={f.url} target="_blank" rel="noreferrer" download className="underline">
+                      abrir foto
+                    </a>
+                  ))}{" "}
+                  (clic derecho → Guardar imagen).
+                </li>
+                <li>
+                  Tocá <b>Copiar instrucción</b>, abrí Gemini, adjuntá la foto con el botón + y pegá la
+                  instrucción.
+                </li>
+                <li>Descargá la imagen que te hace Gemini y subila acá abajo.</li>
+              </ol>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => copiar(0)}
+                  disabled={Boolean(problema)}
+                  className="rounded-md bg-white border border-green-700 text-green-800 text-xs font-semibold px-3 py-1.5 hover:bg-green-100 disabled:opacity-50"
+                >
+                  {copiado === 0 ? "✓ Copiada" : "Copiar instrucción"}
+                </button>
+                <span className="text-xs text-green-900/80">
+                  Si sale una palabra mal escrita, pedile en el mismo chat: &quot;corregí la palabra ...&quot;.
+                </span>
+              </div>
+              {cajaSubirResultado}
+            </div>
+          ) : detalladaConIA ? (
             <div className="rounded-lg border border-green-200 bg-green-50/60 p-4 flex flex-wrap items-center gap-3">
               <button
                 type="button"
@@ -1785,8 +1912,13 @@ export default function EstudioIA({
                   {cantidadFotos > 1 && " Para cada foto, pegá su instrucción (1, 2, 3...)."}
                 </li>
                 <li>
-                  Descargá el resultado y subilo arriba en <b>Fotos y videos</b>, tildando{" "}
-                  <i>&quot;Son fotos o videos generados con IA&quot;</i>.
+                  {modo === "FOTO" ? (
+                    <>Descargá el resultado y subilo en el recuadro de abajo.</>
+                  ) : (
+                    <>
+                      Descargá el resultado y subilo en el paso 3, en <b>Subir o cambiar fotos y videos</b>.
+                    </>
+                  )}
                   {cantidadFotos > 1 && " Para publicarlas juntas elegí “Carrusel” en Publicar en redes."}
                 </li>
               </ol>
@@ -1820,6 +1952,7 @@ export default function EstudioIA({
                 producto, pedile en el mismo chat: &quot;keep the product exactly as in the original
                 photo&quot;.
               </p>
+              {modo === "FOTO" && cajaSubirResultado}
             </div>
           ) : (
             <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-4 flex flex-col gap-3">
