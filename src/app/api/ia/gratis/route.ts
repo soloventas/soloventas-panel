@@ -118,7 +118,12 @@ export async function POST(req: NextRequest) {
         tipo: "FOTO",
         url: blob.url,
         pathname: blob.pathname,
-        nombre: datos.modelo === "ficha-navegador" ? "Foto detallada.jpg" : "Collage.jpg",
+        nombre:
+          datos.modelo === "ficha-navegador" || datos.modelo === "gemini-detallada"
+            ? "Foto detallada.jpg"
+            : datos.modelo === "gemini-web"
+            ? "Foto de Gemini.jpg"
+            : "Collage.jpg",
         tamano: foto.size,
         orden: await siguienteOrden(datos.productoId, "FOTO"),
         origen: "IA",
@@ -129,10 +134,16 @@ export async function POST(req: NextRequest) {
       data: {
         productoId: datos.productoId,
         tipo: "FOTO",
-        modelo: datos.modelo === "ficha-navegador" ? "ficha-navegador" : "collage-navegador",
+        modelo: ["ficha-navegador", "gemini-detallada", "gemini-web"].includes(datos.modelo)
+          ? datos.modelo
+          : "collage-navegador",
         prompt:
           datos.modelo === "ficha-navegador"
             ? "Foto detallada armada en el panel"
+            : datos.modelo === "gemini-detallada"
+            ? "Foto detallada hecha en Gemini"
+            : datos.modelo === "gemini-web"
+            ? "Foto hecha en Gemini"
             : "Collage con las fotos del producto",
         statusUrl: "",
         responseUrl: "",
