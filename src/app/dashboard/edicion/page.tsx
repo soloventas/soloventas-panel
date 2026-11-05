@@ -41,7 +41,13 @@ export default async function EdicionPage({
   const producto = searchParams.producto
     ? await prisma.producto.findUnique({
         where: { id: searchParams.producto },
-        select: { id: true, nombre: true, codigo: true, descripcion: true },
+        select: {
+          id: true,
+          nombre: true,
+          codigo: true,
+          descripcion: true,
+          variantes: { select: { color: { select: { nombre: true } }, talle: { select: { nombre: true } } } },
+        },
       })
     : null;
 
@@ -58,8 +64,11 @@ export default async function EdicionPage({
         select: { clave: true, nombre: true },
       }),
     ]);
+    const { variantes, ...datos } = producto;
     elegido = {
-      ...producto,
+      ...datos,
+      colores: Array.from(new Set(variantes.map((v) => v.color?.nombre || "").filter(Boolean))),
+      talles: Array.from(new Set(variantes.map((v) => v.talle?.nombre || "").filter(Boolean))),
       media,
       redes: {
         instagram: cuentas.find((c) => c.clave === "instagram")?.nombre ?? null,
