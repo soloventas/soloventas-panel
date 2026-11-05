@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
         tipo: "FOTO",
         url: blob.url,
         pathname: blob.pathname,
-        nombre: "Collage.jpg",
+        nombre: datos.modelo === "ficha-navegador" ? "Foto detallada.jpg" : "Collage.jpg",
         tamano: foto.size,
         orden: await siguienteOrden(datos.productoId, "FOTO"),
         origen: "IA",
@@ -129,8 +129,11 @@ export async function POST(req: NextRequest) {
       data: {
         productoId: datos.productoId,
         tipo: "FOTO",
-        modelo: "collage-navegador",
-        prompt: "Collage con las fotos del producto",
+        modelo: datos.modelo === "ficha-navegador" ? "ficha-navegador" : "collage-navegador",
+        prompt:
+          datos.modelo === "ficha-navegador"
+            ? "Foto detallada armada en el panel"
+            : "Collage con las fotos del producto",
         statusUrl: "",
         responseUrl: "",
         estado: "LISTO",
