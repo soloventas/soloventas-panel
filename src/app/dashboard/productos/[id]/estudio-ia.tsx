@@ -310,7 +310,7 @@ export default function EstudioIA({
   const [porSeparado, setPorSeparado] = useState(false);
   // Foto detallada: gratis en Gemini (la pegás vos), con IA paga dentro del panel
   // (Nano Banana Pro, la misma de Gemini) o armada por el panel con diseño fijo.
-  const [modoDetallada, setModoDetallada] = useState<"gemini" | "ia" | "panel">("gemini");
+  const [modoDetallada, setModoDetallada] = useState<"gemini" | "ia" | "panel">(falActivo ? "ia" : "gemini");
   const [subiendo, setSubiendo] = useState(false);
   const [textoPublicacion, setTextoPublicacion] = useState("");
   const [avance, setAvance] = useState<string | null>(null);
@@ -1267,22 +1267,22 @@ export default function EstudioIA({
         <>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <TarjetaIA
-              activa={modoDetallada === "gemini"}
-              onClick={() => setModoDetallada("gemini")}
-              nombre="Gratis en Gemini"
-              empresa="Google"
-              detalle="Como lo hiciste vos: el panel te da la foto y la instrucción, la pegás en Gemini y subís acá el resultado."
-              etiqueta="Gratis"
-              recomendada
-            />
-            <TarjetaIA
               activa={modoDetallada === "ia"}
               onClick={() => setModoDetallada("ia")}
               nombre="Con IA dentro del panel"
               empresa="Nano Banana Pro · la de Gemini"
-              detalle="Lo hace solo con un clic, sin salir de tu página."
+              detalle="Todo en tu página: la IA mira la foto, escribe los textos y arma el folleto sola. Vos no escribís nada."
               etiqueta={costoTexto(buscarModelo("FOTO", "nano-banana-pro"), "FOTO", duracion, 1)}
+              recomendada
               apagada={!falActivo}
+            />
+            <TarjetaIA
+              activa={modoDetallada === "gemini"}
+              onClick={() => setModoDetallada("gemini")}
+              nombre="Gratis en Gemini"
+              empresa="Google"
+              detalle="Gratis, pero se hace en la página de Gemini: copiás la instrucción, la pegás allá y subís acá el resultado."
+              etiqueta="Gratis"
             />
             <TarjetaIA
               activa={modoDetallada === "panel"}
