@@ -27,6 +27,7 @@ function Tarjeta({
   children,
   puedeGuardar,
   datos,
+  enlaces,
 }: {
   proveedor: Proveedor;
   titulo: string;
@@ -37,6 +38,8 @@ function Tarjeta({
   children: React.ReactNode;
   puedeGuardar: boolean;
   datos: Record<string, string>;
+  // Accesos directos a la cuenta (entrar, cargar saldo, ver gastos).
+  enlaces?: { texto: string; url: string }[];
 }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState(!conectada && Boolean(obligatoria));
@@ -116,6 +119,22 @@ function Tarjeta({
         </div>
       </div>
 
+      {enlaces && enlaces.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {enlaces.map((e) => (
+            <a
+              key={e.url}
+              href={e.url}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md border border-violet-300 bg-violet-50 text-violet-800 text-xs font-semibold px-3 py-1.5 hover:bg-violet-100"
+            >
+              {e.texto} ↗
+            </a>
+          ))}
+        </div>
+      )}
+
       {abierto && (
         <div className="flex flex-col gap-2">
           {children}
@@ -162,7 +181,8 @@ export default function ConectarIAs({ cf, fal }: { cf: boolean; fal: boolean }) 
         proveedor="cloudflare"
         titulo="Cloudflare Workers AI"
         etiqueta="Gratis · obligatoria"
-        descripcion="Hace las fotos con IA (modelos, estilos de publicidad, fondo blanco). Unas 50 fotos gratis por día."
+        descripcion="Hace las fotos con IA (modelos, estilos de publicidad, fondo blanco) y escribe los textos de la foto detallada. Unas 50 fotos gratis por día."
+        enlaces={[{ texto: "🔑 Entrar a mi cuenta", url: "https://dash.cloudflare.com/login" }]}
         conectada={cf}
         obligatoria
         puedeGuardar={Boolean(cuenta.trim() && token.trim())}
@@ -203,10 +223,15 @@ export default function ConectarIAs({ cf, fal }: { cf: boolean; fal: boolean }) 
         proveedor="fal"
         titulo="fal.ai"
         etiqueta="Paga · opcional"
-        descripcion="Para videos con una persona usando el artículo (UGC) y fotos premium. Pagás solo lo que generás (un video de 5 s ronda US$0,42)."
+        descripcion="Para la foto detallada con IA (como Gemini), videos con una persona usando el artículo y fotos premium. Pagás solo lo que generás: una foto detallada económica ronda US$ 0,04 y un video de 5 s, US$ 0,42. Si se te termina el saldo, cargalo con el botón de abajo."
         conectada={fal}
         puedeGuardar={Boolean(claveFal.trim())}
         datos={{ token: claveFal }}
+        enlaces={[
+          { texto: "🔑 Entrar a mi cuenta", url: "https://fal.ai/login" },
+          { texto: "💳 Cargar saldo", url: "https://fal.ai/dashboard/billing" },
+          { texto: "📊 Ver cuánto gasté", url: "https://fal.ai/dashboard/usage" },
+        ]}
       >
         <ol className="text-xs text-gray-700 list-decimal pl-4 flex flex-col gap-1">
           <li>
