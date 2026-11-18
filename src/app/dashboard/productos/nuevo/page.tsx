@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import RangoTalles from "../rango-talles";
 
 type Variante = { colorId: string; talleId: string; stock: number };
 type Categoria = { id: string; nombre: string };
@@ -391,6 +392,22 @@ export default function NuevoProductoPage() {
               >
                 + Agregar variante
               </button>
+              {admiteTalle && (
+                <RangoTalles
+                  talles={talles}
+                  colores={colores}
+                  admiteColor={admiteColor}
+                  onTalles={setTalles}
+                  onAgregar={(nuevas) =>
+                    setVariantes((prev) => {
+                      const llenas = prev.filter((v) => v.colorId || v.talleId);
+                      const clave = (v: Variante) => `${v.colorId}|${v.talleId}`;
+                      const ya = new Set(llenas.map(clave));
+                      return [...llenas, ...nuevas.filter((v) => !ya.has(clave(v)))];
+                    })
+                  }
+                />
+              )}
               {((admiteColor && colores.length === 0) ||
                 (admiteTalle && talles.length === 0)) && (
                 <p className="text-xs text-gray-400 mt-2">
