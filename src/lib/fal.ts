@@ -22,6 +22,12 @@ async function leer(res: Response) {
       data?.detail?.[0]?.msg ||
       data?.error ||
       `Error ${res.status} de fal.ai`;
+    // Sin saldo en fal.ai: mensaje claro en español.
+    if (/balance|locked|billing/i.test(String(detalle))) {
+      throw new Error(
+        "Tu cuenta de fal.ai se quedó sin saldo. Cargalo en el paso 1 · Conectar IAs → fal.ai → 💳 Cargar saldo, y probá de nuevo."
+      );
+    }
     throw new Error(detalle);
   }
   return data;
