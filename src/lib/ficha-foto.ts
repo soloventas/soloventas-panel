@@ -92,6 +92,145 @@ function renglones(
   return y + lineas.length * tam * 1.18;
 }
 
+// Pared clara con luz suave y una mesa de madera abajo, como una foto de estudio.
+function dibujarEstudio(ctx: CanvasRenderingContext2D, W: number, alto: number, mesa: number, fondo: string) {
+  const pared = ctx.createLinearGradient(0, 0, 0, mesa);
+  pared.addColorStop(0, "#ffffff");
+  pared.addColorStop(1, fondo);
+  ctx.fillStyle = pared;
+  ctx.fillRect(0, 0, W, mesa);
+  const luz = ctx.createRadialGradient(W * 0.72, mesa * 0.35, 20, W * 0.72, mesa * 0.35, W * 0.7);
+  luz.addColorStop(0, "rgba(255,255,255,0.75)");
+  luz.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = luz;
+  ctx.fillRect(0, 0, W, mesa);
+
+  // Mesa de madera con vetas.
+  const madera = ctx.createLinearGradient(0, mesa, 0, alto);
+  madera.addColorStop(0, "#d9b38c");
+  madera.addColorStop(1, "#b07d52");
+  ctx.fillStyle = madera;
+  ctx.fillRect(0, mesa, W, alto - mesa);
+  let semilla = 7;
+  const azar = () => ((semilla = (semilla * 9301 + 49297) % 233280) / 233280);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, mesa, W, alto - mesa);
+  ctx.clip();
+  for (let i = 0; i < 46; i++) {
+    const y0 = mesa + azar() * (alto - mesa);
+    ctx.strokeStyle = `rgba(${azar() > 0.5 ? "90,55,25" : "255,235,210"},${0.06 + azar() * 0.1})`;
+    ctx.lineWidth = 1 + azar() * 3;
+    ctx.beginPath();
+    const amp = 2 + azar() * 6;
+    const fase = azar() * 10;
+    for (let x = 0; x <= W; x += 20) {
+      const yy = y0 + Math.sin(x / (90 + azar() * 4) + fase) * amp;
+      if (x === 0) ctx.moveTo(x, yy);
+      else ctx.lineTo(x, yy);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+  // Borde de la mesa y sombra de la pared.
+  const borde = ctx.createLinearGradient(0, mesa - 18, 0, mesa + 10);
+  borde.addColorStop(0, "rgba(0,0,0,0)");
+  borde.addColorStop(1, "rgba(0,0,0,0.10)");
+  ctx.fillStyle = borde;
+  ctx.fillRect(0, mesa - 18, W, 28);
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.fillRect(0, mesa, W, 2);
+}
+
+// Saca el fondo blanco o muy claro que toca los bordes de la foto (fotos de
+// producto sobre fondo blanco). Si la foto no tiene ese fondo, devuelve null.
+function recortarFondo(img: HTMLImageElement): HTMLCanvasElement | null {
+  try {
+    const escala = Math.min(1, 1400 / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * escala);
+    const h = Math.round(img.naturalHeight * escala);
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(img, 0, 0, w, h);
+    const datos = ctx.getImageData(0, 0, w, h);
+    const px = datos.data;
+    const claro = (i: number) => {
+      const r = px[i], g = px[i + 1], b = px[i + 2];
+      return r > 222 && g > 222 && b > 222 && Math.max(r, g, b) - Math.min(r, g, b) < 22;
+    };
+    // ¿El borde es mayormente claro?
+    let bordeClaro = 0;
+    let bordeTotal = 0;
+    for (let x = 0; x < w; x += 4) {
+      bordeTotal += 2;
+      if (claro((x) * 4)) bordeClaro++;
+      if (claro(((h - 1) * w + x) * 4)) bordeClaro++;
+    }
+    for (let y = 0; y < h; y += 4) {
+      bordeTotal += 2;
+      if (claro((y * w) * 4)) bordeClaro++;
+      if (claro((y * w + w - 1) * 4)) bordeClaro++;
+    }
+    if (bordeClaro / bordeTotal < 0.7) return null;
+
+    // Relleno desde los bordes: todo lo claro conectado al borde es fondo.
+    const fondo = new Uint8Array(w * h);
+    const pila: number[] = [];
+    const empujar = (k: number) => {
+      if (!fondo[k] && claro(k * 4)) {
+        fondo[k] = 1;
+        pila.push(k);
+      }
+    };
+    for (let x = 0; x < w; x++) {
+      empujar(x);
+      empujar((h - 1) * w + x);
+    }
+    for (let y = 0; y < h; y++) {
+      empujar(y * w);
+      empujar(y * w + w - 1);
+    }
+    while (pila.length) {
+      const k = pila.pop()!;
+      const x = k % w;
+      if (x > 0) empujar(k - 1);
+      if (x < w - 1) empujar(k + 1);
+      if (k >= w) empujar(k - w);
+      if (k < w * (h - 1)) empujar(k + w);
+    }
+    let minX = w, minY = h, maxX = 0, maxY = 0, quedan = 0;
+    for (let k = 0; k < w * h; k++) {
+      if (fondo[k]) {
+        px[k * 4 + 3] = 0;
+        continue;
+      }
+      quedan++;
+      const x = k % w;
+      const y = (k / w) | 0;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      // Borde suave: si toca el fondo, un poco transparente.
+      const vecinoFondo =
+        (x > 0 && fondo[k - 1]) || (x < w - 1 && fondo[k + 1]) || (k >= w && fondo[k - w]) || (k < w * (h - 1) && fondo[k + w]);
+      if (vecinoFondo) px[k * 4 + 3] = 150;
+    }
+    const parte = quedan / (w * h);
+    if (parte < 0.05 || parte > 0.97) return null;
+    ctx.putImageData(datos, 0, 0);
+    const salida = document.createElement("canvas");
+    salida.width = maxX - minX + 1;
+    salida.height = maxY - minY + 1;
+    salida.getContext("2d")!.drawImage(c, minX, minY, salida.width, salida.height, 0, 0, salida.width, salida.height);
+    return salida;
+  } catch {
+    return null; // por ejemplo, si la foto no se puede leer (CORS)
+  }
+}
+
 export async function armarFichaDetallada(
   d: DatosFichaFoto,
   fotoPrincipal: string,
@@ -110,9 +249,6 @@ export async function armarFichaDetallada(
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
 
-  ctx.fillStyle = p.fondo;
-  ctx.fillRect(0, 0, W, H);
-
   const cta = d.cta.trim();
   const altoCta = cta ? 120 : 0;
   const M = 56;
@@ -129,12 +265,58 @@ export async function armarFichaDetallada(
   const lineasCaja = cajaX ? partir(medir, cajaX, bw - 48).slice(0, 6) : [];
   const bh = cajaT || cajaX ? 36 + (cajaT ? 44 : 0) + lineasCaja.length * 25 + 28 : 0;
   const fh = H - altoCta - 64 - (bh ? bh + 24 : 0);
-  ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.18)";
-  ctx.shadowBlur = 30;
-  ctx.shadowOffsetY = 12;
-  fotoEn(ctx, principal, fx, 40, fw, fh);
-  ctx.restore();
+  // Foto de estudio: se le saca el fondo claro y el producto queda parado sobre
+  // una mesa de madera, con luz suave y sombra (sin tocar el producto).
+  const recorte = recortarFondo(principal);
+  const fuente: CanvasImageSource = recorte || principal;
+  const iw = recorte ? recorte.width : principal.naturalWidth;
+  const ih = recorte ? recorte.height : principal.naturalHeight;
+  const margen = recorte ? 0 : 32;
+  const esc = Math.min((fw - margen) / iw, (fh - margen) / ih);
+  const pw = iw * esc;
+  const ph = ih * esc;
+  const px = fx + (fw - pw) / 2;
+  // Recortado, apoyado abajo (sobre la mesa); si no, centrado.
+  const py = recorte ? 40 + fh - ph : 40 + (fh - ph) / 2;
+  const base = py + ph; // donde apoya el producto
+  dibujarEstudio(ctx, W, H - altoCta, Math.min(base - 70, H - altoCta - 200), p.fondo);
+
+  if (recorte) {
+    // Sombra de contacto sobre la mesa.
+    ctx.save();
+    const g = ctx.createRadialGradient(px + pw / 2, base, 4, px + pw / 2, base, pw * 0.6);
+    g.addColorStop(0, "rgba(40,25,10,0.45)");
+    g.addColorStop(1, "rgba(40,25,10,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(px + pw / 2, base, pw * 0.6, 26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.22)";
+    ctx.shadowBlur = 40;
+    ctx.shadowOffsetX = 14;
+    ctx.shadowOffsetY = 10;
+    ctx.filter = "contrast(1.07) saturate(1.1) brightness(1.03)";
+    ctx.drawImage(fuente, px, py, pw, ph);
+    ctx.restore();
+  } else {
+    // Sin poder sacar el fondo: la foto va sobre una tarjeta blanca redondeada.
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.16)";
+    ctx.shadowBlur = 34;
+    ctx.shadowOffsetY = 14;
+    ctx.fillStyle = "#fff";
+    redondeado(ctx, px - 16, py - 16, pw + 32, ph + 32, 28);
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    redondeado(ctx, px, py, pw, ph, 16);
+    ctx.clip();
+    ctx.filter = "contrast(1.07) saturate(1.1) brightness(1.03)";
+    ctx.drawImage(fuente, px, py, pw, ph);
+    ctx.restore();
+  }
 
   // Columna de textos.
   let y = 56;
@@ -200,7 +382,8 @@ export async function armarFichaDetallada(
     .filter(Boolean)
     .slice(0, 4);
   if (otras.length || colores.length) {
-    const yb = H - altoCta - 300;
+    // Justo debajo de los beneficios (sin dejar un hueco grande en el medio).
+    const yb = Math.min(H - altoCta - 300, y + 40);
     ctx.font = `800 24px ${FUENTE}`;
     ctx.fillStyle = p.fuerte;
     ctx.fillText("ELEGÍ LA TUYA  →", M, yb);
