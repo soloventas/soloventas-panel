@@ -310,8 +310,10 @@ export default function EstudioIA({
   const [porSeparado, setPorSeparado] = useState(false);
   // Foto detallada: gratis en Gemini (la pegás vos), con IA paga dentro del panel
   // (Nano Banana Pro, la misma de Gemini) o armada por el panel con diseño fijo.
-  const [modoDetallada, setModoDetallada] = useState<"gemini" | "ia" | "panel">(falActivo ? "ia" : "gemini");
+  const [modoDetallada, setModoDetallada] = useState<"gemini" | "ia" | "panel">("panel");
   const [subiendo, setSubiendo] = useState(false);
+  // La IA paga de la foto detallada: la económica o la mejor (Pro).
+  const [iaDetallada, setIaDetallada] = useState<"nano-banana" | "nano-banana-pro">("nano-banana");
   const [textoPublicacion, setTextoPublicacion] = useState("");
   const [avance, setAvance] = useState<string | null>(null);
   // Detalles escritos sobre la foto por el panel (uno por renglón).
@@ -331,6 +333,9 @@ export default function EstudioIA({
   // Página web de donde traer los detalles (por ejemplo, la del fabricante).
   const [paginaWeb, setPaginaWeb] = useState("");
   const [leyendoPagina, setLeyendoPagina] = useState(false);
+  // Textos de la foto detallada escritos por la IA gratis (para qué foto ya se hicieron).
+  const [textosDe, setTextosDe] = useState<string | null>(null);
+  const [escribiendo, setEscribiendo] = useState(false);
   // Trabajos de la IA paga que esperan que les escribamos el texto al terminar.
   const textoPendiente = useRef<Map<string, TextoFoto>>(new Map());
   // Anuncio UGC: qué hace la persona y la descripción del vendedor.
@@ -448,7 +453,7 @@ export default function EstudioIA({
     ? herramientas
     : herramientas.filter((h, i) => i < VISIBLES || (eleccion.clase === "gratis" && h.id === herramienta.id));
   const modelo = detalladaConIA
-    ? buscarModelo("FOTO", "nano-banana-pro")
+    ? buscarModelo("FOTO", iaDetallada)
     : buscarModelo(modo, eleccion.clase === "paga" ? eleccion.id : undefined);
   const modeloGratis = MODELOS_GRATIS.find((m) => m.id === eleccion.id) || MODELOS_GRATIS[0];
   const textoFoto: TextoFoto = {
@@ -584,6 +589,21 @@ export default function EstudioIA({
     );
   }
 
+  // Baja la foto del producto a la compu para adjuntarla en Gemini.
+  async function descargarFoto(url: string) {
+    try {
+      const r = await fetch(url);
+      const b = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(b);
+      a.download = `${producto.replace(/[^\w\s-]/g, "").trim() || "producto"}.jpg`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch {
+      window.open(url, "_blank");
+    }
+  }
+
   async function copiar(i: number) {
     try {
       await navigator.clipboard.writeText(prompts[i].prompt);
@@ -595,7 +615,7 @@ export default function EstudioIA({
   }
 
   const problemaOpciones = (() => {
-    if (esDetallada && !fichaIA && !ficha.titulo.trim()) return "Escribí el título de la foto detallada.";
+    if (esDetallada && !fichaIA && !cfActivo && !ficha.titulo.trim()) return "Escribí el título de la foto detallada.";
     if (esCollage && !esDetallada && seleccion.length < 2)
       return "Para juntar fotos marcá al menos 2 en el paso 3.";
     if (modo === "VIDEO" && videoTipo === "colores" && seleccion.length < 2)
@@ -765,6 +785,36 @@ export default function EstudioIA({
     if (!r.ok) throw new Error(data.error || "No se pudo guardar el collage.");
   }
 
+  // La IA gratis mira la foto del producto y escribe los textos de la ficha.
+  async function escribirTextosFicha(): Promise<DatosFichaFoto | null> {
+    const foto = seleccionadas[0];
+    if (!foto) return null;
+    setEscribiendo(true);
+    setError("");
+    try {
+      const r = await fetch("/api/ia/textos-ficha", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productoId, mediaId: foto.id, extra: extraDetallada(extra, detallesTexto) }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "La IA gratis no pudo escribir los textos.");
+      const nueva: DatosFichaFoto = {
+        ...ficha,
+        ...Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined && v !== "")),
+        beneficios: Array.isArray(data.beneficios) && data.beneficios.length ? data.beneficios : ficha.beneficios,
+      };
+      setFicha(nueva);
+      setTextosDe(foto.id);
+      return nueva;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "La IA gratis no pudo escribir los textos.");
+      return null;
+    } finally {
+      setEscribiendo(false);
+    }
+  }
+
   async function armarCollageGratis() {
     if (problema) return;
     setError("");
@@ -772,8 +822,12 @@ export default function EstudioIA({
     setDesde(Date.now());
     try {
       if (esDetallada) {
+        // Si la IA todavía no escribió los textos para esta foto, los escribe ahora.
+        let datos = ficha;
+        if (cfActivo && textosDe !== seleccionadas[0]?.id) datos = (await escribirTextosFicha()) || ficha;
+        if (!datos.titulo.trim()) throw new Error("Escribí el título de la foto detallada.");
         const foto = await armarFichaDetallada(
-          ficha,
+          datos,
           seleccionadas[0].url,
           seleccionadas.slice(1).map((f) => f.url)
         );
@@ -1020,6 +1074,14 @@ export default function EstudioIA({
     </label>
   );
 
+  // Al llegar al paso 6 con la foto detallada gratis, la IA escribe los textos sola.
+  useEffect(() => {
+    if (paso === 6 && esDetallada && modoDetallada === "panel" && cfActivo && !escribiendo && seleccionadas[0] && textosDe !== seleccionadas[0].id) {
+      escribirTextosFicha();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paso, esDetallada, modoDetallada, cfActivo, seleccionadas[0]?.id]);
+
   function hacerDeNuevo() {
     if (detalladaGemini || (eleccion.clase === "gratis" && !esDetallada)) return irA(6);
     if (detalladaConIA) return generar();
@@ -1265,32 +1327,48 @@ export default function EstudioIA({
       {/* Paso 5 · IA */}
       {paso === 5 && esDetallada && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <TarjetaIA
-              activa={modoDetallada === "ia"}
-              onClick={() => setModoDetallada("ia")}
-              nombre="Con IA dentro del panel"
-              empresa="Nano Banana Pro · la de Gemini"
-              detalle="Todo en tu página: la IA mira la foto, escribe los textos y arma el folleto sola. Vos no escribís nada."
-              etiqueta={costoTexto(buscarModelo("FOTO", "nano-banana-pro"), "FOTO", duracion, 1)}
+              activa={modoDetallada === "panel"}
+              onClick={() => setModoDetallada("panel")}
+              nombre="Gratis en tu página"
+              empresa="IA gratis (Cloudflare) + tu panel"
+              detalle="Todo acá con un clic: la IA gratis mira la foto y escribe los textos, y el panel arma la ficha con tu foto real, sin faltas."
+              etiqueta="Gratis"
               recomendada
-              apagada={!falActivo}
+              apagada={!cfActivo}
             />
             <TarjetaIA
               activa={modoDetallada === "gemini"}
               onClick={() => setModoDetallada("gemini")}
               nombre="Gratis en Gemini"
               empresa="Google"
-              detalle="Gratis, pero se hace en la página de Gemini: copiás la instrucción, la pegás allá y subís acá el resultado."
+              detalle="Como lo hiciste vos: un botón descarga la foto y copia la instrucción, la pegás en Gemini y subís acá el resultado."
               etiqueta="Gratis"
             />
             <TarjetaIA
-              activa={modoDetallada === "panel"}
-              onClick={() => setModoDetallada("panel")}
-              nombre="Armada por el panel"
-              empresa="Solo Ventas"
-              detalle="Gratis, con un diseño fijo y tu foto real. Vos escribís cada texto."
-              etiqueta="Gratis"
+              activa={modoDetallada === "ia" && iaDetallada === "nano-banana"}
+              onClick={() => {
+                setModoDetallada("ia");
+                setIaDetallada("nano-banana");
+              }}
+              nombre="Con IA · económica"
+              empresa="Nano Banana · Google Gemini"
+              detalle="Todo en tu página con un clic: la IA mira la foto, escribe los textos y arma el folleto. Vos no escribís nada."
+              etiqueta={costoTexto(buscarModelo("FOTO", "nano-banana"), "FOTO", duracion, 1)}
+              apagada={!falActivo}
+            />
+            <TarjetaIA
+              activa={modoDetallada === "ia" && iaDetallada === "nano-banana-pro"}
+              onClick={() => {
+                setModoDetallada("ia");
+                setIaDetallada("nano-banana-pro");
+              }}
+              nombre="Con IA · la mejor"
+              empresa="Nano Banana Pro · Google Gemini"
+              detalle="Igual, pero con mejor diseño y textos más prolijos. La más parecida a la app de Gemini."
+              etiqueta={costoTexto(buscarModelo("FOTO", "nano-banana-pro"), "FOTO", duracion, 1)}
+              apagada={!falActivo}
             />
           </div>
           {modoDetallada === "ia" && !falActivo && (
@@ -1487,6 +1565,32 @@ export default function EstudioIA({
           )}
           {esDetallada && !fichaIA && (
             <>
+              <div className="rounded-lg border border-navy/30 bg-navy/5 p-3 flex flex-col gap-2">
+                <p className="text-sm font-semibold text-navy">
+                  {escribiendo
+                    ? "✨ La IA está mirando la foto y escribiendo los textos..."
+                    : textosDe
+                    ? "✨ La IA escribió los textos. Revisalos abajo y tocá Crear foto detallada."
+                    : "✨ La IA gratis escribe los textos sola mirando la foto."}
+                </p>
+                <input
+                  value={extra}
+                  onChange={(e) => setExtra(e.target.value.slice(0, 400))}
+                  placeholder="Opcional: algún dato más, ej.: talles del 34 al 45, material piqué o toalla"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-navy"
+                />
+                <button
+                  type="button"
+                  onClick={escribirTextosFicha}
+                  disabled={escribiendo || !cfActivo}
+                  className="self-start rounded-md border border-navy text-navy text-sm font-semibold px-3 py-1.5 hover:bg-white disabled:opacity-50"
+                >
+                  {escribiendo ? "Escribiendo..." : textosDe ? "↻ Escribir otros textos" : "✨ Escribir los textos"}
+                </button>
+                {!cfActivo && (
+                  <p className="text-[11px] text-amber-700">Conectá la IA gratis en el Paso 1 para que escriba los textos.</p>
+                )}
+              </div>
               <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   value={paginaWeb}
@@ -1758,35 +1862,34 @@ export default function EstudioIA({
                   Abrir Gemini ↗
                 </a>
               </div>
-              <ol className="text-sm text-green-950 list-decimal pl-5 flex flex-col gap-1">
-                <li>
-                  Guardá la foto del producto:{" "}
-                  {seleccionadas.slice(0, 1).map((f) => (
-                    <a key={f.id} href={f.url} target="_blank" rel="noreferrer" download className="underline">
-                      abrir foto
-                    </a>
-                  ))}{" "}
-                  (clic derecho → Guardar imagen).
-                </li>
-                <li>
-                  Tocá <b>Copiar instrucción</b>, abrí Gemini, adjuntá la foto con el botón + y pegá la
-                  instrucción.
-                </li>
-                <li>Descargá la imagen que te hace Gemini y subila acá abajo.</li>
-              </ol>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-col gap-2">
                 <button
                   type="button"
-                  onClick={() => copiar(0)}
-                  disabled={Boolean(problema)}
-                  className="rounded-md bg-white border border-green-700 text-green-800 text-xs font-semibold px-3 py-1.5 hover:bg-green-100 disabled:opacity-50"
+                  onClick={() => seleccionadas[0] && descargarFoto(seleccionadas[0].url)}
+                  className="self-start rounded-md bg-white border border-green-700 text-green-800 text-sm font-semibold px-3 py-2 hover:bg-green-100"
                 >
-                  {copiado === 0 ? "✓ Copiada" : "Copiar instrucción"}
+                  1 · ⬇️ Descargar la foto del producto
                 </button>
-                <span className="text-xs text-green-900/80">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await copiar(0);
+                    window.open("https://gemini.google.com/app", "_blank");
+                  }}
+                  disabled={Boolean(problema)}
+                  className="self-start rounded-md bg-green-700 text-white text-sm font-semibold px-3 py-2 hover:opacity-90 disabled:opacity-50"
+                >
+                  {copiado === 0 ? "✓ Instrucción copiada · Gemini abierto" : "2 · 📋 Copiar instrucción y abrir Gemini"}
+                </button>
+                <p className="text-sm text-green-950">
+                  3 · En Gemini tocá <b>+</b>, adjuntá la foto que bajaste, pegá la instrucción
+                  (Ctrl+V) y enviá. Después descargá la imagen que te hace.
+                </p>
+                <p className="text-xs text-green-900/80">
                   Si sale una palabra mal escrita, pedile en el mismo chat: &quot;corregí la palabra ...&quot;.
-                </span>
+                </p>
               </div>
+              <p className="text-sm text-green-950">4 · Subila acá:</p>
               {cajaSubirResultado}
             </div>
           ) : detalladaConIA ? (
@@ -1804,7 +1907,7 @@ export default function EstudioIA({
                   : "📋 Crear foto detallada con IA"}
               </button>
               <span className="text-xs text-green-900">
-                Nano Banana Pro · {costo} · tarda alrededor de un minuto
+                {modelo.nombre} · {costo} · tarda alrededor de un minuto
               </span>
             </div>
           ) : esCollage ? (
@@ -1812,13 +1915,15 @@ export default function EstudioIA({
               <button
                 type="button"
                 onClick={armarCollageGratis}
-                disabled={Boolean(problema) || enviando}
+                disabled={Boolean(problema) || enviando || escribiendo}
                 className="rounded-md bg-green-700 text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50"
               >
                 {enviando
                   ? "Armando..."
                   : esDetallada
-                  ? resultados.length > 0
+                  ? escribiendo
+                    ? "Escribiendo los textos..."
+                    : resultados.length > 0
                     ? "↻ Armar otra foto detallada"
                     : "📋 Crear foto detallada"
                   : resultados.length > 0
